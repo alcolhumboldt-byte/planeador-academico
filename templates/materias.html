@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% block title %}Materias{% endblock %}
+
+{% block body %}
+<div class="flex min-h-screen bg-surface">
+  {% include "layout.html" %}
+
+  <main class="flex-1 flex flex-col">
+    <!-- Top Bar -->
+    <header class="sticky top-0 z-40 bg-surface/80 backdrop-blur-md flex justify-between items-center h-16 px-lg w-full border-b border-outline-variant/20">
+      <div class="flex items-center gap-md flex-1">
+        <div class="relative w-full max-w-md hidden md:block">
+          <span class="material-symbols-outlined absolute left-md top-1/2 -translate-y-1/2 text-on-surface-variant text-[20px]">search</span>
+          <input type="text" placeholder="Buscar materias..." id="buscar-materia"
+            class="w-full pl-12 pr-4 py-2 bg-surface-container-high border-none rounded-full text-sm focus:ring-2 focus:ring-primary/20"/>
+        </div>
+      </div>
+      <div class="flex items-center gap-md">
+        <div class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center text-primary font-bold text-sm">
+          {{ session.get('usuario', 'U')[0].upper() }}
+        </div>
+      </div>
+    </header>
+
+    <section class="p-lg md:p-xl flex-1 max-w-7xl mx-auto w-full pb-20 md:pb-xl">
+      <!-- Header -->
+      <div class="flex flex-col md:flex-row md:items-end justify-between mb-xl gap-md">
+        <div>
+          <h2 class="text-3xl font-bold text-on-surface">Mis materias</h2>
+          <p class="text-base text-on-surface-variant mt-xs">Gestiona tus materias y cursos asignados.</p>
+        </div>
+        <button onclick="document.getElementById('modal-agregar').classList.remove('hidden')"
+          class="bg-primary text-on-primary px-lg py-md rounded-full text-sm font-medium flex items-center gap-base hover:opacity-90 transition-all shadow-lg active:scale-95">
+          <span class="material-symbols-outlined">add_circle</span>
+          Agregar materia
+        </button>
+      </div>
+
+      <!-- Toast de mensajes -->
+      <div id="toast" class="hidden fixed top-4 right-4 z-50 px-lg py-md rounded-2xl text-sm font-medium shadow-lg flex items-center gap-sm transition-all"></div>
+
+      <!-- Detectar automáticamente -->
+      <div class="mb-xl bg-surface-container-lowest rounded-[24px] border border-outline-variant/30 p-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-md">
+        <div class="flex items-center gap-md">
+          <div class="p-sm bg-tertiary-fixed rounded-xl text-tertiary">
+            <span class="material-symbols-outlined">robot_2</span>
+          </div>
+          <div>
+            <p class="font-medium text-sm text-on-surface">Detectar materias automáticamente</p>
+            <p class="text-xs text-on-surface-variant">El bot abre Chrome e importa tus materias desde la plataforma del colegio.</p>
+          </div>
+        </div>
+        <button onclick="detectarMaterias()" id="btn-detectar"
+          class="bg-tertiary text-on-tertiary px-lg py-sm rounded-full text-sm font-medium hover:opacity-90 transition-all flex items-center gap-xs">
+          <span class="material-symbols-outlined text-[16px]">play_arrow</span>
+          Detectar
+        </button>
+      </div>
+
+      <!-- Grid de materias -->
+      {% if materias %}
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-lg" id="grid-materias">
+        {% for mid, mat in materias.items() %}
+        <div class="materia-card bg-surface-container-lowest rounded-[32px] p-lg border border-outline-variant/30 flex flex-col hover:-translate-y-1 hover:shadow-lg transition-all duration-200">
+          <div class="flex justify-between items-start mb-lg">
+            <div class="p-md bg-primary-container/10 rounded-2xl text-primary">
+              <span class="material-symbols-outlined text-[32px]">auto_stories</span>
+            </div>
+            <span class="bg-primary-fixed text-on-primary-fixed px-sm py-xs rounded-full text-xs font-medium">{{ mat.codigo }}</span>
+          </div>
+          <h3 class="text-xl font-medium mb-xs text-on-surface">{{ mat.nombre }}</h3>
+          <p class="text-sm text-on-surface-variant mb-lg flex-1">
+            {{ mat.cursos | length }} cursos:
+            <span class="font-mono text-xs">{{ mat.cursos[:3] | join(', ') }}{% if mat.cursos | length > 3 %}...{% endif %}</span>
+          </p>
+          <div class="flex flex-wrap gap-xs mb-lg">
+            {% for curso in mat.cursos[:4] %}
+            <span class="px-sm py-xs bg-surface-container-high rounded-full text-xs text-on-surface-variant">{{ curso }}</span>
+            {% endfor %}
+            {% if mat.cursos | length > 4 %}
+            <span class="px-sm py-xs bg-surface-container-high rounded-full text-xs text-on-surface-variant">+{{ mat.cursos | length - 4 }}</span>
+            {% endif %}
+          </div>
+          <div class="flex gap-sm border-t border-outline-variant/20 pt-lg">
+            <button onclick="editarMateria('{{ mid }}', '{{ mat.nombre }}', '{{ mat.codigo }}', '{{ mat.cursos | join(',') }}')"
+              class="flex-1 border border-outline text-on-surface px-md py-sm rounded-xl text-sm hover:bg-surface-variant transition-colors">
+              Editar
+            </button>
+            <a href="/planear" class="flex-1 bg-primary-container text-on-primary-container px-md py-sm rounded-xl text-sm font-medium text-center hover:opacity-90 transition-opacity">
+              Planear
+            </a>
+          </div>
+        </div>
+        {% endfor %}
+
+        <!-- Agregar nueva -->
+        <div onclick="document.getElementById('modal-agregar').classList.remove('hidden')"
+          class="bg-surface-container-high rounded-[32px] p-lg border-2 border-dashed border-outline-variant flex flex-col items-center justify-center text-center cursor-pointer hover:border-primary transition-all group min-h-[280px]">
+          <div class="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-lg group-hover:scale-110 transition-transform">
+            <span class="material-symbols-outlined text-primary text-[32px]">add</span>
+          </div>
+          <h3 class="text-lg font-medium text-on-surface mb-xs">Nueva materia</h3>
+          <p class="text-sm text-on-surface-variant max-w-[180px]">Agrega una materia manualmente.</p>
+        </div>
+      </div>
+      {% else %}
+      <div class="text-center py-2xl">
+        <span class="material-symbols-outlined text-6xl text-outline block mb-lg">auto_stories</span>
+        <h3 class="text-xl font-medium text-on-surface mb-xs">Sin materias configuradas</h3>
+        <p class="text-sm text-on-surface-variant mb-xl">Agrega tu primera materia para comenzar a planear.</p>
+        <button onclick="document.getElementById('modal-agregar').classList.remove('hidden')"
+          class="bg-primary text-on-primary px-2xl py-md rounded-full text-sm font-medium hover:opacity-90 shadow-lg">
+          Agregar primera materia
+        </button>
+      </div>
+      {% endif %}
+    </section>
+  </main>
+</div>
+
+<!-- Modal Agregar -->
+<div id="modal-agregar" class="hidden fixed inset-0 z-50 flex items-center justify-center p-md bg-black/40 backdrop-blur-sm">
+  <div class="bg-surface-container-lowest rounded-[32px] p-xl w-full max-w-md border border-outline-variant/30 shadow-2xl">
+    <div class="flex items-center justify-between mb-xl">
+      <h3 class="text-lg font-medium text-on-surface">Agregar materia</h3>
+      <button onclick="document.getElementById('modal-agregar').classList.add('hidden')"
+        class="text-on-surface-variant hover:text-on-surface transition-colors">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <div class="space-y-lg">
+      <div class="space-y-xs">
+        <label class="text-sm font-medium text-on-surface-variant">Nombre de la materia</label>
+        <input id="ag-nombre" type="text" placeholder="Ej: Educación Musical"
+          class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary"/>
+      </div>
+      <div class="space-y-xs">
+        <label class="text-sm font-medium text-on-surface-variant">Código en la plataforma</label>
+        <input id="ag-codigo" type="text" placeholder="Ej: EA01"
+          class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary"/>
+      </div>
+      <div class="space-y-xs">
+        <label class="text-sm font-medium text-on-surface-variant">Cursos (separados por coma)</label>
+        <input id="ag-cursos" type="text" placeholder="Ej: 0601,0602,0701,0702"
+          class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary font-mono"/>
+      </div>
+      <div class="space-y-xs">
+        <label class="text-sm font-medium text-on-surface-variant">Recursos</label>
+        <textarea id="ag-recursos" rows="3" placeholder="Ej: Xilófonos, percusión, sistema de sonido"
+          class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary resize-none"></textarea>
+      </div>
+      <div class="flex gap-sm pt-sm">
+        <button onclick="document.getElementById('modal-agregar').classList.add('hidden')"
+          class="flex-1 border border-outline text-on-surface py-md rounded-xl text-sm hover:bg-surface-variant transition-colors">
+          Cancelar
+        </button>
+        <button onclick="agregarMateria()"
+          class="flex-1 bg-primary text-on-primary py-md rounded-xl text-sm font-medium hover:opacity-90 transition-all">
+          Crear materia
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Editar -->
+<div id="modal-editar" class="hidden fixed inset-0 z-50 flex items-center justify-center p-md bg-black/40 backdrop-blur-sm">
+  <div class="bg-surface-container-lowest rounded-[32px] p-xl w-full max-w-md border border-outline-variant/30 shadow-2xl">
+    <div class="flex items-center justify-between mb-xl">
+      <h3 class="text-lg font-medium text-on-surface">Editar materia</h3>
+      <button onclick="document.getElementById('modal-editar').classList.add('hidden')"
+        class="text-on-surface-variant hover:text-on-surface transition-colors">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <div class="space-y-lg">
+      <input type="hidden" id="edit-mid"/>
+      <div class="space-y-xs">
+        <label class="text-sm font-medium text-on-surface-variant">Cursos (separados por coma)</label>
+        <input id="edit-cursos" type="text"
+          class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary font-mono"/>
+      </div>
+      <div class="flex gap-sm pt-sm">
+        <button onclick="document.getElementById('modal-editar').classList.add('hidden')"
+          class="flex-1 border border-outline text-on-surface py-md rounded-xl text-sm hover:bg-surface-variant transition-colors">
+          Cancelar
+        </button>
+        <button onclick="guardarCursos()"
+          class="flex-1 bg-primary text-on-primary py-md rounded-xl text-sm font-medium hover:opacity-90 transition-all">
+          Guardar cambios
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, ok=true) {
+  const t = document.getElementById('toast');
+  t.className = `fixed top-4 right-4 z-50 px-lg py-md rounded-2xl text-sm font-medium shadow-lg flex items-center gap-sm ${ok ? 'bg-tertiary-fixed text-on-surface' : 'bg-error-container text-on-error-container'}`;
+  t.innerHTML = `<span class="material-symbols-outlined text-[18px]">${ok ? 'check_circle' : 'error'}</span> ${msg}`;
+  t.classList.remove('hidden');
+  setTimeout(() => t.classList.add('hidden'), 3000);
+}
+
+async function detectarMaterias() {
+  const btn = document.getElementById('btn-detectar');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="material-symbols-outlined text-[16px] animate-spin">progress_activity</span> Detectando...';
+  try {
+    const res = await fetch('/api/detectar_materias', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({}) });
+    const data = await res.json();
+    if (data.ok) {
+      toast('Materias detectadas correctamente. Recargando...');
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      toast(data.error || 'Error al detectar materias', false);
+      btn.disabled = false;
+      btn.innerHTML = '<span class="material-symbols-outlined text-[16px]">play_arrow</span> Detectar';
+    }
+  } catch(e) {
+    toast('Error de conexión', false);
+    btn.disabled = false;
+    btn.innerHTML = '<span class="material-symbols-outlined text-[16px]">play_arrow</span> Detectar';
+  }
+}
+
+async function agregarMateria() {
+  const nombre   = document.getElementById('ag-nombre').value.trim();
+  const codigo   = document.getElementById('ag-codigo').value.trim();
+  const cursosRaw = document.getElementById('ag-cursos').value.trim();
+  const recursos = document.getElementById('ag-recursos').value.trim();
+  const cursos   = cursosRaw ? cursosRaw.split(',').map(c => c.trim()).filter(Boolean) : [];
+
+  if (!nombre || !codigo) { toast('Nombre y código son obligatorios', false); return; }
+
+  const res = await fetch('/api/materias/agregar', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ nombre, codigo, cursos, recursos })
+  });
+  const data = await res.json();
+  if (data.ok) { toast('Materia creada'); setTimeout(() => location.reload(), 1000); }
+  else { toast(data.error || 'Error al crear materia', false); }
+}
+
+function editarMateria(mid, nombre, codigo, cursos) {
+  document.getElementById('edit-mid').value = mid;
+  document.getElementById('edit-cursos').value = cursos;
+  document.getElementById('modal-editar').classList.remove('hidden');
+}
+
+async function guardarCursos() {
+  const key    = document.getElementById('edit-mid').value;
+  const cursosRaw = document.getElementById('edit-cursos').value.trim();
+  const cursos = cursosRaw ? cursosRaw.split(',').map(c => c.trim()).filter(Boolean) : [];
+
+  const res = await fetch('/api/materias/editar_cursos', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ key, cursos })
+  });
+  const data = await res.json();
+  if (data.ok) { toast('Cambios guardados'); setTimeout(() => location.reload(), 1000); }
+  else { toast(data.error || 'Error al guardar', false); }
+}
+
+document.getElementById('buscar-materia')?.addEventListener('input', function() {
+  const q = this.value.toLowerCase();
+  document.querySelectorAll('.materia-card').forEach(card => {
+    card.style.display = card.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+});
+</script>
+{% endblock %}

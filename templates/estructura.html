@@ -1,0 +1,247 @@
+{% extends "layout.html" %}
+{% set active = "estructura" %}
+{% block title %}Estructura de clase{% endblock %}
+{% block body %}
+<h1>Estructura de mis clases</h1>
+<p class="page-sub">Define cómo está organizada cada clase — la IA respetará este orden al planear</p>
+
+<div id="msg-est"></div>
+
+<div class="form-group">
+  <label class="form-label">Materia</label>
+  <select id="sel-materia" onchange="cargarEstructura()">
+    <option value="">— Selecciona —</option>
+    {% for key, mat in materias.items() %}
+    <option value="{{ mat.nombre }}">{{ mat.nombre }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div id="panel-estructura" class="hidden">
+
+  <div class="card mb-16" style="background:var(--accent-light);border-color:#93ADEE">
+    <div style="font-size:13px;color:var(--accent-text)">
+      <strong>¿Cómo funciona?</strong> — Define las secciones de tu clase en orden.
+      La IA generará actividades respetando exactamente esta estructura y los tiempos.
+    </div>
+  </div>
+
+  <div class="card mb-16">
+    <div class="flex-between mb-16">
+      <h3>Secciones de la clase</h3>
+      <div class="flex gap-8 text-small text-muted">
+        Tiempo total: <strong id="total-min">0</strong> min
+      </div>
+    </div>
+
+    <div id="secciones-container">
+      <!-- Secciones se agregan aquí -->
+    </div>
+
+    <button class="btn btn-sm w-full mt-8" style="border-style:dashed" onclick="agregarSeccion()">
+      + Agregar sección
+    </button>
+  </div>
+
+  <!-- Plantillas predefinidas -->
+  <div class="card mb-16">
+    <h3 class="mb-8">Plantillas rápidas</h3>
+    <p class="text-small text-muted mb-16">Carga una plantilla como punto de partida y edítala</p>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      <button class="btn btn-sm" onclick="cargarPlantilla('musica')">🎵 Clase de Música</button>
+      <button class="btn btn-sm" onclick="cargarPlantilla('religion')">✝ Ed. Religiosa</button>
+      <button class="btn btn-sm" onclick="cargarPlantilla('general')">📚 Clase general</button>
+      <button class="btn btn-sm" onclick="cargarPlantilla('taller')">🔧 Taller práctico</button>
+    </div>
+  </div>
+
+  <button class="btn btn-primary btn-block" onclick="guardar()">Guardar estructura</button>
+</div>
+
+<!-- Template de sección -->
+<template id="tpl-seccion">
+  <div class="seccion-item card-sm mb-8" draggable="true">
+    <div class="flex-between mb-8">
+      <div class="flex gap-8" style="align-items:center">
+        <span style="cursor:grab;color:var(--text-hint);font-size:16px">⠿</span>
+        <input type="text" class="sec-nombre" placeholder="Nombre de la sección (ej: Calentamiento)"
+               style="border:none;font-weight:500;font-size:13px;padding:0;width:220px;background:transparent"
+               onchange="actualizarTotal()">
+      </div>
+      <div class="flex gap-8" style="align-items:center">
+        <input type="number" class="sec-duracion" value="10" min="1" max="90"
+               style="width:55px;text-align:center;font-size:13px" onchange="actualizarTotal()">
+        <span class="text-small text-muted">min</span>
+        <button onclick="this.closest('.seccion-item').remove();actualizarTotal()"
+                style="background:none;border:none;cursor:pointer;color:var(--text-hint);font-size:16px;padding:0">✕</button>
+      </div>
+    </div>
+    <input type="text" class="sec-descripcion" placeholder="Descripción opcional (ej: Juego rítmico con palmas y pies)"
+           style="width:100%;font-size:12px;color:var(--text-muted)">
+  </div>
+</template>
+
+<script>
+let matActual = '';
+
+const PLANTILLAS = {
+  musica: [
+    { nombre: "Calentamiento vocal y corporal", duracion: 8,  descripcion: "Ejercicios de voz y ritmo con el cuerpo" },
+    { nombre: "Repaso de la clase anterior",    duracion: 7,  descripcion: "Retomar lo trabajado la semana pasada" },
+    { nombre: "Actividad central",              duracion: 20, descripcion: "Tema nuevo o profundización del periodo" },
+    { nombre: "Práctica con instrumentos",      duracion: 10, descripcion: "Trabajo individual o por grupos" },
+    { nombre: "Cierre y reflexión",             duracion: 5,  descripcion: "Qué aprendimos hoy" },
+  ],
+  religion: [
+    { nombre: "Oración inicial",        duracion: 5,  descripcion: "Momento de recogimiento y oración" },
+    { nombre: "Ambientación del tema",  duracion: 8,  descripcion: "Introducir el tema con una historia o imagen" },
+    { nombre: "Desarrollo del tema",    duracion: 20, descripcion: "Explicación y reflexión central" },
+    { nombre: "Actividad de aplicación",duracion: 12, descripcion: "Trabajo en cuaderno o actividad grupal" },
+    { nombre: "Cierre y compromiso",    duracion: 5,  descripcion: "Compromisos personales o grupales" },
+  ],
+  general: [
+    { nombre: "Inicio y motivación",    duracion: 8,  descripcion: "Activar conocimientos previos" },
+    { nombre: "Explicación del tema",   duracion: 15, descripcion: "Presentación del contenido nuevo" },
+    { nombre: "Práctica guiada",        duracion: 15, descripcion: "Ejercicios con acompañamiento del profesor" },
+    { nombre: "Práctica independiente", duracion: 10, descripcion: "Trabajo individual o en grupos" },
+    { nombre: "Cierre",                 duracion: 5,  descripcion: "Resumen y preguntas finales" },
+  ],
+  taller: [
+    { nombre: "Presentación del reto",  duracion: 5,  descripcion: "Explicar qué se va a construir o crear" },
+    { nombre: "Demostración",           duracion: 10, descripcion: "El profesor muestra el proceso" },
+    { nombre: "Trabajo práctico",       duracion: 25, descripcion: "Los estudiantes trabajan en el proyecto" },
+    { nombre: "Revisión y ajustes",     duracion: 8,  descripcion: "Correcciones y mejoras" },
+    { nombre: "Socialización",          duracion: 5,  descripcion: "Mostrar el trabajo al grupo" },
+  ],
+};
+
+function cargarPlantilla(tipo) {
+  const secs = PLANTILLAS[tipo];
+  if (!secs) return;
+  document.getElementById('secciones-container').innerHTML = '';
+  secs.forEach(s => agregarSeccion(s));
+  actualizarTotal();
+}
+
+function agregarSeccion(data = {}) {
+  const tpl  = document.getElementById('tpl-seccion');
+  const item = tpl.content.cloneNode(true).querySelector('.seccion-item');
+
+  if (data.nombre)      item.querySelector('.sec-nombre').value      = data.nombre;
+  if (data.duracion)    item.querySelector('.sec-duracion').value     = data.duracion;
+  if (data.descripcion) item.querySelector('.sec-descripcion').value  = data.descripcion;
+
+  document.getElementById('secciones-container').appendChild(item);
+  actualizarTotal();
+
+  // Drag to reorder
+  item.addEventListener('dragstart', () => item.style.opacity = '0.4');
+  item.addEventListener('dragend',   () => item.style.opacity = '1');
+  item.addEventListener('dragover',  e => { e.preventDefault(); item.style.borderColor = 'var(--accent)'; });
+  item.addEventListener('dragleave', () => item.style.borderColor = '');
+  item.addEventListener('drop', e => {
+    e.preventDefault();
+    item.style.borderColor = '';
+    const dragged = document.querySelector('.seccion-item[style*="opacity: 0.4"]');
+    if (dragged && dragged !== item) {
+      const container = document.getElementById('secciones-container');
+      const items     = [...container.querySelectorAll('.seccion-item')];
+      const fromIdx   = items.indexOf(dragged);
+      const toIdx     = items.indexOf(item);
+      if (fromIdx < toIdx) item.after(dragged);
+      else item.before(dragged);
+    }
+  });
+}
+
+function actualizarTotal() {
+  const items = document.querySelectorAll('.seccion-item');
+  let total   = 0;
+  items.forEach(item => {
+    total += parseInt(item.querySelector('.sec-duracion').value) || 0;
+  });
+  document.getElementById('total-min').textContent = total;
+}
+
+async function cargarEstructura() {
+  matActual = document.getElementById('sel-materia').value;
+  if (!matActual) return;
+
+  document.getElementById('panel-estructura').classList.remove('hidden');
+
+  const res  = await fetch(`/api/estructura/obtener?materia=${encodeURIComponent(matActual)}`);
+  const data = await res.json();
+
+  document.getElementById('secciones-container').innerHTML = '';
+
+  if (data.estructura && data.estructura.secciones && data.estructura.secciones.length) {
+    data.estructura.secciones.forEach(s => agregarSeccion(s));
+    mostrarMsg(`Estructura cargada — actualizada el ${data.estructura.actualizado}`, 'info');
+  } else {
+    // Sin estructura guardada — cargar plantilla según materia
+    const tipo = matActual.toLowerCase().includes('m') ? 'musica'
+               : matActual.toLowerCase().includes('rel') ? 'religion'
+               : 'general';
+    cargarPlantilla(tipo);
+    mostrarMsg('Plantilla cargada como punto de partida — edítala y guarda', 'info');
+  }
+  actualizarTotal();
+}
+
+async function guardar() {
+  if (!matActual) { mostrarMsg('Selecciona una materia', 'error'); return; }
+
+  const items    = document.querySelectorAll('.seccion-item');
+  const secciones = [];
+
+  items.forEach(item => {
+    const nombre = item.querySelector('.sec-nombre').value.trim();
+    if (!nombre) return;
+    secciones.push({
+      nombre,
+      duracion:    parseInt(item.querySelector('.sec-duracion').value) || 10,
+      descripcion: item.querySelector('.sec-descripcion').value.trim(),
+    });
+  });
+
+  if (!secciones.length) { mostrarMsg('Agrega al menos una sección', 'error'); return; }
+
+  const res  = await fetch('/api/estructura/guardar', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ materia: matActual, secciones })
+  });
+  const data = await res.json();
+
+  if (data.ok) mostrarMsg(`Estructura de ${matActual} guardada — la IA la usará al planear`, 'success');
+  else mostrarMsg(data.error || 'Error', 'error');
+}
+
+function mostrarMsg(texto, tipo) {
+  document.getElementById('msg-est').innerHTML =
+    `<div class="alert alert-${tipo}">${texto}</div>`;
+  setTimeout(() => document.getElementById('msg-est').innerHTML = '', 4000);
+}
+
+// Agregar micrófono dinámicamente a cada descripción de sección
+function agregarMicSeccion(item) {
+  const desc = item.querySelector('.sec-descripcion');
+  if (!desc || desc.dataset.micOk) return;
+  const uid  = 'sec-' + Math.random().toString(36).slice(2,7);
+  desc.id    = uid;
+  const { btn, estadoDiv } = Voz.crearBoton(uid);
+  btn.style.marginTop = '4px';
+  desc.parentNode.insertBefore(estadoDiv, desc.nextSibling);
+  desc.parentNode.insertBefore(btn, desc.nextSibling);
+  desc.dataset.micOk = '1';
+}
+
+// Parchear agregarSeccion para incluir micrófono
+const _agregarSeccionOrig = agregarSeccion;
+agregarSeccion = function(data = {}) {
+  _agregarSeccionOrig(data);
+  const items = document.querySelectorAll('.seccion-item');
+  agregarMicSeccion(items[items.length - 1]);
+};
+</script>
+<script src="/static/js/voz.js"></script>
+{% endblock %}

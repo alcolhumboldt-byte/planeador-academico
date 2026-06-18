@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% block title %}Asistente IA{% endblock %}
+
+{% block body %}
+<div class="flex h-screen bg-surface overflow-hidden">
+  {% include "layout.html" %}
+
+  <main class="flex-1 flex flex-col h-full bg-surface relative">
+    <!-- Top Bar -->
+    <header class="flex justify-between items-center h-16 px-lg w-full sticky top-0 z-40 bg-surface/80 backdrop-blur-md border-b border-outline-variant/20">
+      <div class="flex items-center gap-md">
+        <div class="p-sm bg-secondary-container rounded-xl">
+          <span class="material-symbols-outlined text-primary">smart_toy</span>
+        </div>
+        <div>
+          <h2 class="text-lg font-medium text-on-surface">Asistente Pedagógico</h2>
+          <p class="text-xs text-on-surface-variant flex items-center gap-xs">
+            <span class="w-2 h-2 rounded-full bg-tertiary inline-block"></span>
+            Listo para ayudarte
+          </p>
+        </div>
+      </div>
+      <div class="flex items-center gap-md">
+        <button onclick="limpiarChat()" class="text-on-surface-variant hover:text-primary transition-colors p-sm rounded-full hover:bg-surface-container-highest" title="Limpiar chat">
+          <span class="material-symbols-outlined">delete_sweep</span>
+        </button>
+        <div class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center text-primary font-bold text-sm">
+          {{ session.get('usuario', 'U')[0].upper() }}
+        </div>
+      </div>
+    </header>
+
+    <!-- Chat Area -->
+    <section class="flex-1 overflow-y-auto p-lg flex flex-col gap-xl pb-2xl" id="chat-container">
+      <!-- Onboarding si no hay historial -->
+      <div id="onboarding" class="{% if historial %}hidden{% endif %} flex flex-col items-center justify-center flex-1 text-center py-2xl">
+        <div class="w-20 h-20 bg-secondary-container rounded-full flex items-center justify-center mb-lg">
+          <span class="material-symbols-outlined text-primary text-[40px]" style="font-variation-settings:'FILL' 1">smart_toy</span>
+        </div>
+        <h3 class="text-xl font-medium text-on-surface mb-xs">¡Hola, {{ session.get('usuario', 'Profe').split()[0] }}!</h3>
+        <p class="text-sm text-on-surface-variant max-w-sm mb-xl">Soy tu asistente pedagógico. Puedo ayudarte a diseñar actividades, sugerir recursos, adaptar contenidos y mucho más.</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-md max-w-lg w-full">
+          <button onclick="enviarSugerencia('¿Qué actividades creativas puedo hacer para enseñar ritmo a niños de primaria?')"
+            class="p-md bg-surface-container-low rounded-xl border border-outline-variant/30 text-left hover:border-primary/40 transition-all text-sm">
+            <span class="material-symbols-outlined text-tertiary block mb-xs">music_note</span>
+            Ideas para enseñar ritmo en primaria
+          </button>
+          <button onclick="enviarSugerencia('Dame una actividad de 10 minutos para calentamiento vocal con estudiantes de secundaria')"
+            class="p-md bg-surface-container-low rounded-xl border border-outline-variant/30 text-left hover:border-primary/40 transition-all text-sm">
+            <span class="material-symbols-outlined text-primary block mb-xs">record_voice_over</span>
+            Calentamiento vocal para secundaria
+          </button>
+          <button onclick="enviarSugerencia('¿Cómo puedo evaluar el trabajo en grupo de manera justa y objetiva?')"
+            class="p-md bg-surface-container-low rounded-xl border border-outline-variant/30 text-left hover:border-primary/40 transition-all text-sm">
+            <span class="material-symbols-outlined text-primary block mb-xs">grading</span>
+            Evaluar trabajo en grupo
+          </button>
+          <button onclick="enviarSugerencia('Sugiere recursos digitales gratuitos para clase de música')"
+            class="p-md bg-surface-container-low rounded-xl border border-outline-variant/30 text-left hover:border-primary/40 transition-all text-sm">
+            <span class="material-symbols-outlined text-tertiary block mb-xs">devices</span>
+            Recursos digitales para música
+          </button>
+        </div>
+      </div>
+
+      <!-- Historial de mensajes -->
+      <div id="mensajes" class="flex flex-col gap-xl {% if not historial %}hidden{% endif %}">
+        {% for msg in historial %}
+          {% if msg.rol == 'usuario' %}
+          <div class="flex gap-md max-w-[80%] self-end flex-row-reverse">
+            <div class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center text-primary font-bold text-xs flex-shrink-0">
+              {{ session.get('usuario', 'U')[0].upper() }}
+            </div>
+            <div class="flex flex-col gap-xs items-end">
+              <div class="bg-primary text-on-primary p-lg rounded-2xl rounded-tr-none shadow-md">
+                <p class="text-sm">{{ msg.contenido }}</p>
+              </div>
+            </div>
+          </div>
+          {% else %}
+          <div class="flex gap-md max-w-[85%]">
+            <div class="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center flex-shrink-0">
+              <span class="material-symbols-outlined text-primary text-[18px]" style="font-variation-settings:'FILL' 1">smart_toy</span>
+            </div>
+            <div class="bg-surface-container text-on-surface p-lg rounded-2xl rounded-tl-none border border-outline-variant/20 shadow-sm">
+              <div class="text-sm prose prose-sm max-w-none">{{ msg.contenido | safe }}</div>
+            </div>
+          </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+
+      <!-- Indicador de escritura -->
+      <div id="typing-indicator" class="hidden flex gap-md max-w-[85%]">
+        <div class="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center flex-shrink-0">
+          <span class="material-symbols-outlined text-primary text-[18px]" style="font-variation-settings:'FILL' 1">smart_toy</span>
+        </div>
+        <div class="bg-surface-container p-lg rounded-2xl rounded-tl-none border border-outline-variant/20">
+          <div class="flex gap-xs items-center">
+            <span class="w-2 h-2 rounded-full bg-outline animate-bounce" style="animation-delay:0ms"></span>
+            <span class="w-2 h-2 rounded-full bg-outline animate-bounce" style="animation-delay:150ms"></span>
+            <span class="w-2 h-2 rounded-full bg-outline animate-bounce" style="animation-delay:300ms"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Input Bar -->
+    <section class="p-lg bg-surface border-t border-outline-variant/20">
+      <div class="max-w-4xl mx-auto">
+        <!-- Chips de sugerencia -->
+        <div class="flex gap-sm mb-sm overflow-x-auto pb-xs" style="scrollbar-width:none">
+          <button onclick="enviarSugerencia('Dame ideas para una actividad creativa')"
+            class="px-md py-xs bg-surface-container-high hover:bg-primary-container hover:text-on-primary-container transition-colors rounded-full text-xs flex items-center gap-xs flex-shrink-0">
+            <span class="material-symbols-outlined text-[14px]">lightbulb</span> Ideas creativas
+          </button>
+          <button onclick="enviarSugerencia('¿Cómo adapto esta clase para diferentes niveles?')"
+            class="px-md py-xs bg-surface-container-high hover:bg-primary-container hover:text-on-primary-container transition-colors rounded-full text-xs flex items-center gap-xs flex-shrink-0">
+            <span class="material-symbols-outlined text-[14px]">tune</span> Adaptar niveles
+          </button>
+          <button onclick="enviarSugerencia('Genera un quiz rápido sobre el tema')"
+            class="px-md py-xs bg-surface-container-high hover:bg-primary-container hover:text-on-primary-container transition-colors rounded-full text-xs flex items-center gap-xs flex-shrink-0">
+            <span class="material-symbols-outlined text-[14px]">quiz</span> Generar quiz
+          </button>
+        </div>
+
+        <!-- Campo de texto -->
+        <div class="relative flex items-end gap-sm bg-surface-container-lowest border border-outline-variant rounded-[24px] p-xs shadow-lg focus-within:ring-2 focus-within:ring-primary/20 transition-all">
+          <textarea id="msg-input" rows="1" placeholder="Escribe tu consulta pedagógica..."
+            class="flex-1 border-none focus:ring-0 bg-transparent py-md px-sm text-sm resize-none min-h-[48px] max-h-32"
+            oninput="this.style.height='';this.style.height=this.scrollHeight+'px'"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensaje()}"></textarea>
+          <div class="flex items-center gap-xs pr-xs pb-xs">
+            <button id="mic-btn" onclick="toggleVoz()"
+              class="w-10 h-10 flex items-center justify-center bg-secondary-container text-primary rounded-full hover:bg-primary-container transition-all active:scale-90">
+              <span class="material-symbols-outlined text-[18px]" id="mic-icon" style="font-variation-settings:'FILL' 1">mic</span>
+            </button>
+            <button onclick="enviarMensaje()"
+              class="w-10 h-10 flex items-center justify-center bg-primary text-on-primary rounded-full hover:opacity-90 active:scale-95 transition-all">
+              <span class="material-symbols-outlined text-[18px]">send</span>
+            </button>
+          </div>
+        </div>
+        <p class="text-center text-xs text-on-surface-variant mt-sm opacity-60">La IA puede cometer errores. Verifica información importante.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="/static/js/voz.js"></script>
+<script>
+const chatContainer = document.getElementById('chat-container');
+const mensajesDiv = document.getElementById('mensajes');
+const onboarding = document.getElementById('onboarding');
+const typingIndicator = document.getElementById('typing-indicator');
+
+function scrollBottom() {
+  chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+function agregarMensaje(rol, contenido) {
+  onboarding.classList.add('hidden');
+  mensajesDiv.classList.remove('hidden');
+
+  const div = document.createElement('div');
+  if (rol === 'usuario') {
+    div.className = 'flex gap-md max-w-[80%] self-end flex-row-reverse';
+    div.innerHTML = `
+      <div class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center text-primary font-bold text-xs flex-shrink-0">
+        {{ session.get('usuario', 'U')[0].upper() }}
+      </div>
+      <div class="flex flex-col gap-xs items-end">
+        <div class="bg-primary text-on-primary p-lg rounded-2xl rounded-tr-none shadow-md">
+          <p class="text-sm">${contenido}</p>
+        </div>
+      </div>`;
+  } else {
+    div.className = 'flex gap-md max-w-[85%]';
+    div.innerHTML = `
+      <div class="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center flex-shrink-0">
+        <span class="material-symbols-outlined text-primary text-[18px]" style="font-variation-settings:'FILL' 1">smart_toy</span>
+      </div>
+      <div class="bg-surface-container text-on-surface p-lg rounded-2xl rounded-tl-none border border-outline-variant/20 shadow-sm">
+        <div class="text-sm">${contenido}</div>
+      </div>`;
+  }
+  mensajesDiv.appendChild(div);
+  scrollBottom();
+}
+
+async function enviarMensaje() {
+  const input = document.getElementById('msg-input');
+  const texto = input.value.trim();
+  if (!texto) return;
+
+  agregarMensaje('usuario', texto);
+  input.value = '';
+  input.style.height = '';
+
+  typingIndicator.classList.remove('hidden');
+  scrollBottom();
+
+  try {
+    const res = await fetch('/api/asistente/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mensaje: texto})
+    });
+    const data = await res.json();
+    typingIndicator.classList.add('hidden');
+    if (data.respuesta) agregarMensaje('ia', data.respuesta);
+  } catch(e) {
+    typingIndicator.classList.add('hidden');
+    agregarMensaje('ia', 'Hubo un error. Intenta de nuevo.');
+  }
+}
+
+function enviarSugerencia(texto) {
+  document.getElementById('msg-input').value = texto;
+  enviarMensaje();
+}
+
+function limpiarChat() {
+  mensajesDiv.innerHTML = '';
+  mensajesDiv.classList.add('hidden');
+  onboarding.classList.remove('hidden');
+  fetch('/api/asistente/limpiar', {method: 'POST'});
+}
+
+scrollBottom();
+</script>
+{% endblock %}

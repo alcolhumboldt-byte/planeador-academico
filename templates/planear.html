@@ -1,0 +1,634 @@
+{% extends "base.html" %}
+{% block title %}Planear{% endblock %}
+
+{% block body %}
+<div class="flex min-h-screen bg-surface">
+  {% include "layout.html" %}
+
+  <main class="flex-1 flex flex-col">
+    <!-- Top Bar -->
+    <header class="sticky top-0 z-40 bg-surface/80 backdrop-blur-md flex items-center h-16 px-lg w-full border-b border-outline-variant/20">
+      <h1 class="text-lg font-medium text-on-surface">Nueva planeación</h1>
+    </header>
+
+    <section class="p-lg md:p-xl flex-1 max-w-4xl mx-auto w-full pb-20 md:pb-xl">
+
+      <!-- PASO 1 -->
+      <div id="paso-1">
+        <div class="mb-xl">
+          <h2 class="text-2xl font-bold text-on-surface">Paso 1 — Configuración</h2>
+          <p class="text-sm text-on-surface-variant mt-xs">Selecciona la materia, periodo y tema.</p>
+        </div>
+
+        <div class="bg-surface-container-lowest rounded-3xl p-xl border border-outline-variant/30 shadow-sm space-y-lg">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-lg">
+            <!-- Materia -->
+            <div class="space-y-xs">
+              <label class="block text-sm font-medium text-on-surface-variant">Materia</label>
+              <select id="sel-materia" onchange="cargarCursos()"
+                class="w-full rounded-xl border border-outline-variant py-sm px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary">
+                <option value="">— Selecciona —</option>
+                {% for key, mat in materias.items() %}
+                <option value="{{ key }}" data-nombre="{{ mat.nombre }}" data-codigo="{{ mat.codigo }}">
+                  {{ mat.nombre }} ({{ mat.codigo }})
+                </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <!-- Periodo -->
+            <div class="space-y-xs">
+              <label class="block text-sm font-medium text-on-surface-variant">Periodo</label>
+              <select id="sel-periodo"
+                class="w-full rounded-xl border border-outline-variant py-sm px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary">
+                <option value="1">Periodo 1</option>
+                <option value="2" selected>Periodo 2</option>
+                <option value="3">Periodo 3</option>
+              </select>
+            </div>
+
+            <!-- Bloque -->
+            <div class="space-y-xs">
+              <label class="block text-sm font-medium text-on-surface-variant">Bloque de fechas</label>
+              <select id="sel-bloque"
+                class="w-full rounded-xl border border-outline-variant py-sm px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary">
+                <option value="0">Bloque 0 — Semanas 1-2</option>
+                <option value="1">Bloque 1 — Semanas 3-4</option>
+                <option value="2">Bloque 2 — Semanas 5-6</option>
+                <option value="3">Bloque 3 — Semanas 7-8</option>
+                <option value="4">Bloque 4 — Semanas 9-10</option>
+                <option value="5">Bloque 5 — Semanas 11-12</option>
+              </select>
+            </div>
+
+            <!-- Tema general -->
+            <div class="space-y-xs">
+              <label class="block text-sm font-medium text-on-surface-variant">Tema general</label>
+              <div class="flex gap-sm">
+                <input type="text" id="tema-general" placeholder="Escribe o dicta el tema..."
+                  class="flex-1 rounded-xl border border-outline-variant py-sm px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary"/>
+                <button type="button" id="mic-tema-general"
+                  onclick="Voz.grabar('tema-general','mic-tema-general','mic-estado-tema-general')"
+                  class="p-sm rounded-xl border border-outline-variant hover:bg-surface-container-high transition-colors">
+                  <span class="material-symbols-outlined text-[20px] text-on-surface-variant">mic</span>
+                </button>
+              </div>
+              <div id="mic-estado-tema-general" class="text-xs text-on-surface-variant"></div>
+            </div>
+          </div>
+
+          <button onclick="irAPaso2()"
+            class="w-full bg-primary text-on-primary py-md rounded-full font-medium hover:opacity-90 transition-all flex items-center justify-center gap-sm shadow-md active:scale-[0.98]">
+            Continuar
+            <span class="material-symbols-outlined">arrow_forward</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- PASO 2 -->
+      <div id="paso-2" class="hidden">
+        <div class="mb-xl">
+          <h2 class="text-2xl font-bold text-on-surface">Paso 2 — Agrupar cursos</h2>
+          <p class="text-sm text-on-surface-variant mt-xs">Toca un curso para seleccionarlo, luego toca el grupo donde quieres ponerlo.</p>
+        </div>
+
+        <!-- Selector fecha paso 2 -->
+        <div class="bg-surface-container-low rounded-2xl p-md border border-outline-variant/30 mb-lg flex flex-wrap items-center gap-md">
+          <div class="flex items-center gap-sm">
+            <span class="text-xs text-on-surface-variant">Periodo:</span>
+            <select id="paso2-periodo"
+              class="rounded-lg border border-outline-variant py-xs px-sm text-sm bg-surface focus:ring-2 focus:ring-primary">
+              <option value="1">Periodo 1</option>
+              <option value="2">Periodo 2</option>
+              <option value="3">Periodo 3</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-sm">
+            <span class="text-xs text-on-surface-variant">Bloque:</span>
+            <select id="paso2-bloque"
+              class="rounded-lg border border-outline-variant py-xs px-sm text-sm bg-surface focus:ring-2 focus:ring-primary">
+              <option value="0">Bloque 0 — Sem 1-2</option>
+              <option value="1">Bloque 1 — Sem 3-4</option>
+              <option value="2">Bloque 2 — Sem 5-6</option>
+              <option value="3">Bloque 3 — Sem 7-8</option>
+              <option value="4">Bloque 4 — Sem 9-10</option>
+              <option value="5">Bloque 5 — Sem 11-12</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="bg-surface-container-lowest rounded-3xl p-xl border border-outline-variant/30 shadow-sm mb-lg">
+          <!-- Pool -->
+          <div class="space-y-xs mb-lg">
+            <label class="block text-sm font-medium text-on-surface-variant">Cursos sin asignar</label>
+            <div id="instruccion-tap" class="hidden text-xs text-primary bg-primary-fixed px-md py-xs rounded-lg mb-xs"></div>
+            <div id="pool" class="drop-zone min-h-[52px] flex flex-wrap gap-xs p-md bg-surface rounded-xl border-2 border-dashed border-outline-variant cursor-pointer"
+              onclick="moverAZona('pool')"></div>
+          </div>
+
+          <!-- Grupos -->
+          <div id="grupos-container" class="space-y-md"></div>
+
+          <button onclick="agregarGrupo()"
+            class="w-full mt-md border-2 border-dashed border-outline-variant text-on-surface-variant py-sm rounded-xl text-sm hover:border-primary hover:text-primary transition-colors flex items-center justify-center gap-xs">
+            <span class="material-symbols-outlined text-[18px]">add</span>
+            Agregar grupo
+          </button>
+        </div>
+
+        <div class="flex gap-sm">
+          <button onclick="volverPaso1()"
+            class="border border-outline text-on-surface px-xl py-md rounded-full text-sm hover:bg-surface-container-high transition-colors flex items-center gap-xs">
+            <span class="material-symbols-outlined">arrow_back</span>
+            Volver
+          </button>
+          <button onclick="irAPaso3()"
+            class="flex-1 bg-primary text-on-primary py-md rounded-full font-medium hover:opacity-90 transition-all flex items-center justify-center gap-sm shadow-md active:scale-[0.98]">
+            Generar planeaciones
+            <span class="material-symbols-outlined">auto_awesome</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- PASO 3 -->
+      <div id="paso-3" class="hidden">
+        <div class="mb-xl">
+          <h2 class="text-2xl font-bold text-on-surface">Paso 3 — Generando planeaciones</h2>
+          <p id="resumen-fecha-paso3" class="text-sm text-on-surface-variant mt-xs"></p>
+        </div>
+
+        <div class="bg-surface-container-lowest rounded-3xl p-xl border border-outline-variant/30 shadow-sm mb-lg">
+          <p class="text-sm text-on-surface-variant mb-lg">La IA está generando contenido único para cada grupo.</p>
+          <div id="progreso-generacion" class="space-y-sm"></div>
+        </div>
+
+        <!-- Resultado -->
+        <div id="resultado-generacion" class="hidden space-y-lg">
+          <div id="msg-resultado" class="px-lg py-md bg-tertiary-fixed text-on-surface rounded-2xl text-sm flex items-center gap-sm">
+            <span class="material-symbols-outlined">check_circle</span>
+            <span></span>
+          </div>
+
+          <!-- Observaciones -->
+          <div class="bg-surface-container-lowest rounded-3xl p-xl border border-outline-variant/30 shadow-sm">
+            <h3 class="text-base font-medium text-on-surface mb-xs">¿Qué mejorarías?</h3>
+            <p class="text-sm text-on-surface-variant mb-md">Escribe observaciones para que la IA mejore la próxima vez.</p>
+            <textarea id="obs-texto" rows="3" placeholder="Ej: Las actividades de jardín quedaron muy largas..."
+              class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface focus:ring-2 focus:ring-primary resize-none mb-md"></textarea>
+            <button onclick="guardarObservacion()"
+              class="border border-outline text-on-surface px-lg py-sm rounded-full text-sm hover:bg-surface-container-high transition-colors">
+              Guardar observación
+            </button>
+          </div>
+
+          <!-- Enviar plataforma -->
+          <div class="bg-primary-container/20 rounded-3xl p-xl border border-primary/20 shadow-sm">
+            <div class="flex items-start justify-between gap-md mb-md">
+              <div>
+                <h3 class="text-base font-medium text-on-surface">Enviar a la plataforma del colegio</h3>
+                <p class="text-sm text-on-surface-variant mt-xs">Chrome se abre, tú inicias sesión y el bot guarda todo automáticamente.</p>
+              </div>
+              <button id="btn-enviar" onclick="enviarPlataforma()"
+                class="bg-primary text-on-primary px-lg py-sm rounded-full text-sm font-medium hover:opacity-90 transition-all whitespace-nowrap flex items-center gap-xs">
+                <span class="material-symbols-outlined text-[18px]">send</span>
+                Enviar
+              </button>
+            </div>
+
+            <div id="panel-progreso" class="hidden">
+              <div class="text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-sm">Progreso</div>
+              <div id="log-progreso" class="bg-surface rounded-xl p-md text-xs font-mono max-h-48 overflow-y-auto border border-outline-variant/30 space-y-xs"></div>
+              <div id="acciones-post-envio" class="hidden mt-lg flex gap-sm">
+                <button onclick="planearOtraMateria()"
+                  class="flex-1 bg-primary text-on-primary py-md rounded-full text-sm font-medium hover:opacity-90 transition-all">
+                  + Planear otra materia
+                </button>
+                <button onclick="cerrarChrome()"
+                  class="border border-error text-error px-lg py-md rounded-full text-sm hover:bg-error-container transition-colors">
+                  Cerrar Chrome
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <a href="/dashboard"
+            class="block w-full border border-outline text-on-surface py-md rounded-full text-sm text-center hover:bg-surface-container-high transition-colors">
+            Volver al inicio
+          </a>
+        </div>
+      </div>
+
+    </section>
+  </main>
+</div>
+
+<style>
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--color-outline-variant, #c4c5d7);
+  background: var(--color-surface-container-high, #e8e8f0);
+  color: var(--color-on-surface, #1a1c24);
+  transition: all 0.15s;
+  user-select: none;
+}
+.chip:hover { opacity: 0.8; }
+.grupo-1 { background: #dce1ff; border-color: #0041c6; color: #001780; }
+.grupo-2 { background: #a5f4bc; border-color: #004222; color: #002111; }
+.grupo-3 { background: #ffd8cc; border-color: #9c3a00; color: #5c2000; }
+.grupo-4 { background: #ffefc8; border-color: #7a5900; color: #3d2c00; }
+.grupo-5 { background: #f2ddff; border-color: #6b008a; color: #38004a; }
+.drop-zone.drag-over { border-color: #0041c6 !important; background: #dce1ff !important; }
+.loading { color: var(--color-on-surface-variant, #666); font-size: 13px; padding: 8px 0; }
+.loading::after { content: '...'; animation: dots 1s infinite; }
+@keyframes dots { 0%,20%{content:'.'} 40%,60%{content:'..'} 80%,100%{content:'...'} }
+</style>
+
+<script>
+const MATERIAS_DATA = {{ materias | tojson }};
+let matKey    = '';
+let matNombre = '';
+let cursos    = [];
+let grupos    = [];
+let numGrupos = 0;
+const COLORES = ['grupo-1','grupo-2','grupo-3','grupo-4','grupo-5'];
+
+const resumenChat = sessionStorage.getItem('resumen_chat') || '';
+const materiaChatNombre = sessionStorage.getItem('materia_chat') || '';
+if (resumenChat) {
+  document.getElementById('tema-general').value = '(Ver ideas del asistente)';
+  sessionStorage.removeItem('resumen_chat');
+  sessionStorage.removeItem('materia_chat');
+}
+
+function cargarCursos() {
+  const sel = document.getElementById('sel-materia');
+  matKey    = sel.value;
+  if (!matKey || !MATERIAS_DATA[matKey]) return;
+  matNombre = MATERIAS_DATA[matKey].nombre;
+  cursos    = MATERIAS_DATA[matKey].cursos || [];
+}
+
+function irAPaso2() {
+  matKey = document.getElementById('sel-materia').value;
+  if (!matKey) { alert('Selecciona una materia'); return; }
+  cargarCursos();
+  if (!cursos.length) { alert('Esta materia no tiene cursos configurados'); return; }
+
+  document.getElementById('paso2-periodo').value = document.getElementById('sel-periodo').value;
+  document.getElementById('paso2-bloque').value  = document.getElementById('sel-bloque').value;
+
+  chipSeleccionado = null;
+  const pool = document.getElementById('pool');
+  pool.innerHTML = '';
+  cursos.forEach(curso => pool.appendChild(crearChip(curso, '')));
+
+  grupos = [];
+  numGrupos = 0;
+  document.getElementById('grupos-container').innerHTML = '';
+  agregarGrupo();
+
+  document.getElementById('paso-1').classList.add('hidden');
+  document.getElementById('paso-2').classList.remove('hidden');
+  inicializarDragDrop();
+}
+
+let chipSeleccionado = null;
+
+function crearChip(curso, colorClass) {
+  const chip = document.createElement('span');
+  chip.className = `chip ${colorClass}`;
+  chip.textContent = curso;
+  chip.draggable = true;
+  chip.dataset.curso = curso;
+  chip.addEventListener('click', (e) => { e.stopPropagation(); seleccionarChip(chip); });
+  return chip;
+}
+
+function seleccionarChip(chip) {
+  if (chipSeleccionado) {
+    chipSeleccionado.style.outline = '';
+    chipSeleccionado.style.transform = '';
+  }
+  if (chipSeleccionado === chip) {
+    chipSeleccionado = null;
+    document.getElementById('instruccion-tap').classList.add('hidden');
+    return;
+  }
+  chipSeleccionado = chip;
+  chip.style.outline = '3px solid #0041c6';
+  chip.style.transform = 'scale(1.1)';
+  const inst = document.getElementById('instruccion-tap');
+  inst.textContent = `"${chip.dataset.curso}" seleccionado — toca el grupo donde quieres ponerlo`;
+  inst.classList.remove('hidden');
+}
+
+function moverAZona(zonaId) {
+  if (!chipSeleccionado) return;
+  const zona = document.getElementById(zonaId) || document.querySelector(`[data-grupo="${zonaId}"]`);
+  if (!zona) return;
+  const color = zona.dataset.color || '';
+  chipSeleccionado.className = color ? `chip ${color}` : 'chip';
+  chipSeleccionado.style.outline = '';
+  chipSeleccionado.style.transform = '';
+  zona.appendChild(chipSeleccionado);
+  chipSeleccionado = null;
+  document.getElementById('instruccion-tap').classList.add('hidden');
+}
+
+function agregarGrupo() {
+  numGrupos++;
+  const color = COLORES[(numGrupos-1) % COLORES.length];
+  const idx   = numGrupos;
+  const div   = document.createElement('div');
+  div.className = 'bg-surface rounded-2xl p-md border border-outline-variant/30';
+  div.id = `grupo-${idx}`;
+  div.innerHTML = `
+    <div class="flex items-center justify-between mb-sm">
+      <span class="text-sm font-medium text-on-surface">Grupo ${idx}</span>
+      <button onclick="eliminarGrupo(${idx})" class="text-outline hover:text-error transition-colors">
+        <span class="material-symbols-outlined text-[18px]">close</span>
+      </button>
+    </div>
+    <div id="zone-${idx}" class="drop-zone min-h-[44px] flex flex-wrap gap-xs p-sm bg-surface-container-high rounded-xl border-2 border-dashed border-outline-variant mb-sm cursor-pointer"
+      data-grupo="${idx}" data-color="${color}" onclick="moverAZona('zone-${idx}')"></div>
+    <input type="text" id="tema-${idx}" placeholder="Tema de este grupo (opcional)"
+      class="w-full rounded-xl border border-outline-variant py-xs px-md text-sm bg-surface focus:ring-2 focus:ring-primary"/>
+  `;
+  document.getElementById('grupos-container').appendChild(div);
+  grupos.push({ idx, color });
+  inicializarDragDrop();
+}
+
+function eliminarGrupo(idx) {
+  const zone = document.getElementById(`zone-${idx}`);
+  const pool = document.getElementById('pool');
+  if (zone) {
+    Array.from(zone.querySelectorAll('.chip')).forEach(c => { c.className = 'chip'; pool.appendChild(c); });
+    document.getElementById(`grupo-${idx}`).remove();
+    grupos = grupos.filter(g => g.idx !== idx);
+  }
+}
+
+function inicializarDragDrop() {
+  let dragged = null;
+  document.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('dragstart', () => { dragged = chip; setTimeout(() => chip.style.opacity='0.4',0); });
+    chip.addEventListener('dragend', () => { if(dragged) dragged.style.opacity='1'; dragged=null; });
+  });
+  document.querySelectorAll('.drop-zone').forEach(zone => {
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', e => {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+      if (!dragged) return;
+      const color = zone.dataset.color || '';
+      dragged.className = color ? `chip ${color}` : 'chip';
+      zone.appendChild(dragged);
+    });
+  });
+}
+
+function volverPaso1() {
+  document.getElementById('paso-2').classList.add('hidden');
+  document.getElementById('paso-1').classList.remove('hidden');
+}
+
+function mostrarEditorFecha() {
+  const p = document.getElementById('paso2-periodo');
+  const b = document.getElementById('paso2-bloque');
+  p.style.borderColor = '#0041c6';
+  b.style.borderColor = '#0041c6';
+  p.focus();
+  setTimeout(() => { p.style.borderColor = ''; b.style.borderColor = ''; }, 2000);
+}
+
+function volverAPaso2Editar() {
+  document.getElementById('paso-3').classList.add('hidden');
+  document.getElementById('paso-2').classList.remove('hidden');
+  setTimeout(() => mostrarEditorFecha(), 100);
+}
+
+async function irAPaso3() {
+  const gruposFinales = [];
+  document.querySelectorAll('[id^="zone-"]').forEach(zone => {
+    const chips = Array.from(zone.querySelectorAll('.chip')).map(c => c.dataset.curso);
+    if (!chips.length) return;
+    const idx  = zone.dataset.grupo;
+    const tema = document.getElementById(`tema-${idx}`)?.value.trim()
+                 || document.getElementById('tema-general').value.trim()
+                 || 'Tema general de la clase';
+    gruposFinales.push({ cursos: chips, tema });
+  });
+
+  if (!gruposFinales.length) { alert('Agrega al menos un grupo con cursos'); return; }
+
+  const bloque  = parseInt(document.getElementById('paso2-bloque').value);
+  const periodo = parseInt(document.getElementById('sel-periodo').value);
+  document.getElementById('sel-bloque').value  = String(bloque);
+  document.getElementById('sel-periodo').value = String(periodo);
+
+  const nombresBloque = ['Sem 1-2','Sem 3-4','Sem 5-6','Sem 7-8','Sem 9-10','Sem 11-12'];
+  document.getElementById('resumen-fecha-paso3').textContent =
+    `Periodo ${periodo} · Bloque ${bloque} (${nombresBloque[bloque] || ''}) · ${matNombre}`;
+
+  const s1 = String(1 + bloque * 2);
+  const s2 = String(2 + bloque * 2);
+
+  document.getElementById('paso-2').classList.add('hidden');
+  document.getElementById('paso-3').classList.remove('hidden');
+
+  const progDiv = document.getElementById('progreso-generacion');
+  progDiv.innerHTML = '';
+
+  const memRes  = await fetch(`/api/memoria/estilo?materia=${encodeURIComponent(matNombre)}`);
+  const memData = await memRes.json();
+  const estilo  = memData.estilo || '';
+
+  let ctxPeriodo = '';
+  if (memData.periodos && memData.periodos[String(periodo)]) {
+    const per    = memData.periodos[String(periodo)];
+    const bloques = per.bloques || {};
+    const lines  = [`PROGRESION PERIODO ${periodo}: ${per.tema_central || ''}`];
+    Object.entries(bloques).forEach(([b, desc]) => {
+      const ss1  = String(parseInt(b)*2+1);
+      const ss2  = String(parseInt(b)*2+2);
+      const marca = b === String(bloque) ? ' ← ESTAMOS AQUI' : '';
+      lines.push(`Semanas ${ss1}-${ss2}: ${desc || 'continuacion'}${marca}`);
+    });
+    ctxPeriodo = lines.join('\n');
+  }
+
+  let titulosPrev  = [];
+  let actsPrev     = [];
+  let okCount      = 0;
+  gruposGenerados  = [];
+  codigoAsignatura = MATERIAS_DATA[matKey]?.codigo || '';
+
+  for (let i = 0; i < gruposFinales.length; i++) {
+    const grupo = gruposFinales[i];
+    const row   = document.createElement('div');
+    row.className = 'loading bg-surface-container-low rounded-xl p-md text-sm text-on-surface-variant';
+    row.textContent = `Generando grupo ${i+1}/${gruposFinales.length}: ${grupo.cursos.join(', ')}`;
+    progDiv.appendChild(row);
+
+    const ideas = resumenChat ? `${resumenChat}\n\nTema del grupo: ${grupo.tema}` : grupo.tema;
+
+    const res  = await fetch('/api/planear/generar_grupo', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        ideas, materia: matNombre,
+        semana1: parseInt(s1), semana2: parseInt(s2),
+        estilo, ctx_periodo: ctxPeriodo,
+        titulos_previos: titulosPrev,
+        actividades_previas: actsPrev,
+      })
+    });
+    const data = await res.json();
+
+    if (data.ok) {
+      titulosPrev.push(data.titulo);
+      actsPrev.push(data.actividades);
+      row.className = '';
+      row.innerHTML = `
+        <div class="bg-surface-container-lowest rounded-2xl p-lg border border-outline-variant/30 mb-sm">
+          <div class="flex items-center justify-between mb-sm">
+            <span class="px-md py-xs bg-primary-fixed text-on-primary-fixed rounded-full text-xs font-medium">Grupo ${i+1} — ${grupo.cursos.join(', ')}</span>
+            <span class="text-xs text-on-surface-variant flex items-center gap-xs"><span class="material-symbols-outlined text-[14px] text-tertiary">check_circle</span>Listo</span>
+          </div>
+          <div class="font-medium text-sm text-on-surface mb-xs">${data.titulo}</div>
+          <pre class="text-xs text-on-surface-variant whitespace-pre-wrap font-sans">${data.actividades}</pre>
+        </div>`;
+      gruposGenerados.push({
+        cursos:      grupo.cursos,
+        titulo:      data.titulo,
+        actividades: data.actividades,
+        recursos:    MATERIAS_DATA[matKey]?.recursos || 'Tablero y marcadores\n* Cuaderno',
+      });
+      codigoAsignatura = MATERIAS_DATA[matKey]?.codigo || '';
+      periodoActual    = document.getElementById('sel-periodo').value;
+      bloqueActual     = document.getElementById('sel-bloque').value;
+      okCount++;
+    } else {
+      row.className = 'bg-error-container text-on-error-container rounded-xl p-md text-sm';
+      row.textContent = `Error grupo ${i+1}: ${data.error}`;
+    }
+  }
+
+  const msgEl = document.querySelector('#msg-resultado span');
+  if (msgEl) msgEl.textContent = `${okCount} de ${gruposFinales.length} grupos generados correctamente.`;
+  document.getElementById('resultado-generacion').classList.remove('hidden');
+}
+
+let gruposGenerados  = [];
+let codigoAsignatura = '';
+let periodoActual    = '1';
+let bloqueActual     = '0';
+
+async function enviarPlataforma() {
+  if (!gruposGenerados.length) { alert('Primero genera las planeaciones'); return; }
+  const btn = document.getElementById('btn-enviar');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="material-symbols-outlined text-[18px] animate-spin">progress_activity</span> Enviando...';
+
+  document.getElementById('panel-progreso').classList.remove('hidden');
+  const logDiv = document.getElementById('log-progreso');
+  logDiv.innerHTML = '<div class="text-on-surface-variant">Abriendo Chrome — inicia sesión en la plataforma del colegio...</div>';
+
+  const res  = await fetch('/api/enviar_plataforma', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      grupos:              gruposGenerados,
+      periodo:             periodoActual,
+      bloque:              bloqueActual,
+      codigo_asignatura:   codigoAsignatura,
+      session_id_anterior: window._sessionIdAnterior || '',
+    })
+  });
+  const data = await res.json();
+
+  if (!data.ok) {
+    logDiv.innerHTML = `<div class="text-error">${data.error}</div>`;
+    btn.disabled = false;
+    btn.innerHTML = '<span class="material-symbols-outlined text-[18px]">send</span> Enviar';
+    return;
+  }
+
+  const sessionId = data.session_id;
+  window._sessionIdActivo = sessionId;
+  let ultimoIdx   = 0;
+  logDiv.innerHTML = '';
+
+  const colores = { info: 'text-on-surface-variant', ok: 'text-tertiary', warn: 'text-amber-600', error: 'text-error', done: 'text-primary' };
+
+  const poll = setInterval(async () => {
+    const r    = await fetch(`/api/progreso/${sessionId}`);
+    const d    = await r.json();
+    const logs = d.logs || [];
+
+    for (let i = ultimoIdx; i < logs.length; i++) {
+      const entry = logs[i];
+      const cls   = colores[entry.tipo] || 'text-on-surface';
+      const linea = document.createElement('div');
+      linea.className = cls;
+      linea.textContent = entry.tipo === 'ok'    ? '✓ ' + entry.msg
+                        : entry.tipo === 'error' ? '✗ ' + entry.msg
+                        : entry.tipo === 'warn'  ? '! ' + entry.msg
+                        : entry.tipo === 'done'  ? '■ ' + entry.msg
+                        : '· ' + entry.msg;
+      logDiv.appendChild(linea);
+      logDiv.scrollTop = logDiv.scrollHeight;
+
+      if (entry.tipo === 'done') {
+        clearInterval(poll);
+        btn.disabled = false;
+        btn.innerHTML = '<span class="material-symbols-outlined text-[18px]">send</span> Enviar';
+        document.getElementById('acciones-post-envio').classList.remove('hidden');
+      }
+    }
+    ultimoIdx = logs.length;
+  }, 1500);
+}
+
+function planearOtraMateria() {
+  document.getElementById('paso-3').classList.add('hidden');
+  document.getElementById('paso-1').classList.remove('hidden');
+  document.getElementById('panel-progreso').classList.add('hidden');
+  document.getElementById('acciones-post-envio').classList.add('hidden');
+  gruposGenerados = [];
+  window._sessionIdAnterior = window._sessionIdActivo;
+}
+
+async function cerrarChrome() {
+  const sid = window._sessionIdActivo || window._sessionIdAnterior;
+  if (sid) await fetch(`/api/cerrar_chrome/${sid}`, { method: 'POST' });
+  document.getElementById('acciones-post-envio').classList.add('hidden');
+  document.getElementById('panel-progreso').classList.add('hidden');
+  window._sessionIdActivo   = null;
+  window._sessionIdAnterior = null;
+}
+
+async function guardarObservacion() {
+  const obs     = document.getElementById('obs-texto').value.trim();
+  const periodo = document.getElementById('sel-periodo').value;
+  const bloque  = document.getElementById('sel-bloque').value;
+  if (!obs) return;
+  await fetch('/api/memoria/guardar_observacion', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ materia: matNombre, observacion: obs, periodo, bloque })
+  });
+  document.getElementById('obs-texto').value = '';
+  alert('Observación guardada. La IA la usará la próxima vez.');
+}
+</script>
+<script src="/static/js/voz.js"></script>
+{% endblock %}

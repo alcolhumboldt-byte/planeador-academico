@@ -1,0 +1,380 @@
+{% extends "base.html" %}
+{% block title %}Coordinador{% endblock %}
+
+{% block body %}
+<div class="flex min-h-screen bg-surface">
+  {% include "layout.html" %}
+
+  <main class="flex-1 flex flex-col">
+    <!-- Top Bar -->
+    <header class="sticky top-0 z-40 bg-surface/80 backdrop-blur-md flex items-center h-16 px-lg w-full border-b border-outline-variant/20">
+      <div class="flex items-center gap-sm">
+        <span class="material-symbols-outlined text-primary">admin_panel_settings</span>
+        <h1 class="text-lg font-medium text-on-surface">Panel de coordinación</h1>
+      </div>
+    </header>
+
+    <section class="p-lg md:p-xl flex-1 max-w-4xl mx-auto w-full pb-20 md:pb-xl">
+
+      <!-- Header -->
+      <div class="mb-xl">
+        <h2 class="text-2xl font-bold text-on-surface">Verificar planeaciones</h2>
+        <p class="text-sm text-on-surface-variant mt-xs">El bot revisa la plataforma del colegio y genera un informe con IA.</p>
+      </div>
+
+      <!-- Configuración -->
+      <div id="panel-config" class="bg-surface-container-lowest rounded-3xl p-xl border border-outline-variant/30 shadow-sm mb-lg">
+        <h3 class="text-base font-medium text-on-surface mb-lg">Configurar verificación</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-lg mb-lg">
+          <div class="space-y-xs">
+            <label class="block text-sm font-medium text-on-surface-variant">Periodo</label>
+            <select id="sel-periodo"
+              class="w-full rounded-xl border border-outline-variant py-sm px-md text-sm bg-surface focus:ring-2 focus:ring-primary">
+              <option value="1">Periodo 1</option>
+              <option value="2" selected>Periodo 2</option>
+              <option value="3">Periodo 3</option>
+            </select>
+          </div>
+          <div class="space-y-xs">
+            <label class="block text-sm font-medium text-on-surface-variant">Bloque de fechas</label>
+            <select id="sel-bloque"
+              class="w-full rounded-xl border border-outline-variant py-sm px-md text-sm bg-surface focus:ring-2 focus:ring-primary">
+              <option value="0">Bloque 0 — Semanas 1-2</option>
+              <option value="1">Bloque 1 — Semanas 3-4</option>
+              <option value="2">Bloque 2 — Semanas 5-6</option>
+              <option value="3">Bloque 3 — Semanas 7-8</option>
+              <option value="4">Bloque 4 — Semanas 9-10</option>
+              <option value="5">Bloque 5 — Semanas 11-12</option>
+            </select>
+          </div>
+        </div>
+
+        <button onclick="iniciarVerificacion()" id="btn-verificar"
+          class="w-full bg-primary text-on-primary py-md rounded-full font-medium hover:opacity-90 transition-all flex items-center justify-center gap-sm shadow-md active:scale-[0.98]">
+          <span class="material-symbols-outlined">search</span>
+          Verificar planeaciones
+        </button>
+      </div>
+
+      <!-- Progreso -->
+      <div id="panel-progreso" class="hidden bg-surface-container-lowest rounded-3xl p-xl border border-outline-variant/30 shadow-sm mb-lg">
+        <h3 class="text-base font-medium text-on-surface mb-md flex items-center gap-sm">
+          <span class="material-symbols-outlined text-primary animate-spin">progress_activity</span>
+          Verificando planeaciones...
+        </h3>
+        <div id="log-coord" class="bg-surface rounded-xl p-md text-xs font-mono max-h-64 overflow-y-auto border border-outline-variant/30 space-y-xs"></div>
+      </div>
+
+      <!-- Reporte -->
+      <div id="panel-reporte" class="hidden space-y-lg">
+
+        <!-- Stats -->
+        <div class="grid grid-cols-3 gap-md">
+          <div class="bg-tertiary-fixed rounded-2xl p-lg text-center border border-outline-variant/20">
+            <div id="stat-completos" class="text-3xl font-bold text-on-surface">0</div>
+            <div class="text-xs text-on-surface-variant mt-xs flex items-center justify-center gap-xs">
+              <span class="material-symbols-outlined text-[14px]">check_circle</span>
+              Con planeación
+            </div>
+          </div>
+          <div class="bg-error-container rounded-2xl p-lg text-center border border-outline-variant/20">
+            <div id="stat-faltantes" class="text-3xl font-bold text-on-surface">0</div>
+            <div class="text-xs text-on-surface-variant mt-xs flex items-center justify-center gap-xs">
+              <span class="material-symbols-outlined text-[14px]">cancel</span>
+              Sin planeación
+            </div>
+          </div>
+          <div class="bg-surface-container-low rounded-2xl p-lg text-center border border-outline-variant/20">
+            <div id="stat-total" class="text-3xl font-bold text-on-surface">0</div>
+            <div class="text-xs text-on-surface-variant mt-xs flex items-center justify-center gap-xs">
+              <span class="material-symbols-outlined text-[14px]">library_books</span>
+              Total revisados
+            </div>
+          </div>
+        </div>
+
+        <!-- Informe IA -->
+        <div class="bg-primary-container/20 rounded-3xl p-xl border border-primary/20 shadow-sm">
+          <div class="flex items-center justify-between mb-md">
+            <div class="flex items-center gap-sm">
+              <span class="material-symbols-outlined text-primary">auto_awesome</span>
+              <h3 class="text-base font-medium text-on-surface">Informe generado por IA</h3>
+            </div>
+            <button onclick="generarInformeIA()" id="btn-informe"
+              class="bg-primary text-on-primary px-lg py-sm rounded-full text-sm font-medium hover:opacity-90 transition-all flex items-center gap-xs">
+              <span class="material-symbols-outlined text-[16px]">smart_toy</span>
+              Generar informe
+            </button>
+          </div>
+          <div id="informe-ia" class="text-sm text-on-surface-variant italic">
+            Presiona "Generar informe" para que la IA analice los resultados y redacte un resumen ejecutivo.
+          </div>
+        </div>
+
+        <!-- Faltantes por materia -->
+        <div id="seccion-faltantes" class="hidden bg-error-container rounded-3xl p-xl border border-error/20 shadow-sm">
+          <h3 class="text-base font-medium text-on-surface mb-lg flex items-center gap-sm">
+            <span class="material-symbols-outlined text-error">cancel</span>
+            Sin planeación
+          </h3>
+          <div id="lista-faltantes" class="space-y-md"></div>
+        </div>
+
+        <!-- Completos por materia -->
+        <div id="seccion-completos" class="hidden bg-tertiary-fixed/50 rounded-3xl p-xl border border-outline-variant/20 shadow-sm">
+          <h3 class="text-base font-medium text-on-surface mb-lg flex items-center gap-sm">
+            <span class="material-symbols-outlined text-tertiary">check_circle</span>
+            Con planeación
+          </h3>
+          <div id="lista-completos" class="space-y-md"></div>
+        </div>
+
+        <!-- Acciones -->
+        <div class="flex gap-sm">
+          <button onclick="exportarReporte()"
+            class="flex-1 border border-outline text-on-surface py-md rounded-full text-sm hover:bg-surface-container-high transition-colors flex items-center justify-center gap-xs">
+            <span class="material-symbols-outlined text-[18px]">download</span>
+            Exportar .txt
+          </button>
+          <button onclick="nuevaVerificacion()"
+            class="flex-1 bg-primary text-on-primary py-md rounded-full text-sm font-medium hover:opacity-90 transition-all flex items-center justify-center gap-xs">
+            <span class="material-symbols-outlined text-[18px]">refresh</span>
+            Nueva verificación
+          </button>
+        </div>
+
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+let sessionIdCoord = null;
+let reporteActual  = null;
+
+async function iniciarVerificacion() {
+  const periodo = document.getElementById('sel-periodo').value;
+  const bloque  = document.getElementById('sel-bloque').value;
+  const btn     = document.getElementById('btn-verificar');
+
+  btn.disabled  = true;
+  btn.innerHTML = '<span class="material-symbols-outlined animate-spin">progress_activity</span> Verificando...';
+
+  document.getElementById('panel-progreso').classList.remove('hidden');
+  document.getElementById('panel-reporte').classList.add('hidden');
+  document.getElementById('log-coord').innerHTML = '';
+
+  const res  = await fetch('/api/coordinador/verificar', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ periodo, bloque })
+  });
+  const data = await res.json();
+
+  if (!data.ok) {
+    document.getElementById('log-coord').innerHTML =
+      `<div class="text-error">Error: ${data.error}</div>`;
+    btn.disabled  = false;
+    btn.innerHTML = '<span class="material-symbols-outlined">search</span> Verificar planeaciones';
+    return;
+  }
+
+  sessionIdCoord = data.session_id;
+  const logDiv   = document.getElementById('log-coord');
+  const clases   = { info:'text-on-surface-variant', ok:'text-tertiary', warn:'text-error', error:'text-error', done:'text-primary' };
+  let ultimoIdx  = 0;
+
+  const poll = setInterval(async () => {
+    const r    = await fetch(`/api/coordinador/progreso/${sessionIdCoord}`);
+    const d    = await r.json();
+    const logs = d.logs || [];
+
+    for (let i = ultimoIdx; i < logs.length; i++) {
+      const e   = logs[i];
+      const div = document.createElement('div');
+      div.className = clases[e.tipo] || 'text-on-surface';
+      div.textContent = e.tipo === 'ok'    ? '✓ ' + e.msg
+                      : e.tipo === 'warn'  ? '✗ ' + e.msg
+                      : e.tipo === 'error' ? '✗ ' + e.msg
+                      : e.tipo === 'done'  ? '■ ' + e.msg
+                      : '· ' + e.msg;
+      logDiv.appendChild(div);
+      logDiv.scrollTop = logDiv.scrollHeight;
+
+      if (e.tipo === 'done' && d.reporte) {
+        clearInterval(poll);
+        btn.disabled  = false;
+        btn.innerHTML = '<span class="material-symbols-outlined">search</span> Verificar planeaciones';
+        document.getElementById('panel-progreso').classList.add('hidden');
+        mostrarReporte(d.reporte);
+      }
+    }
+    ultimoIdx = logs.length;
+  }, 2000);
+}
+
+function mostrarReporte(reporte) {
+  reporteActual = reporte;
+  document.getElementById('panel-reporte').classList.remove('hidden');
+
+  const completos = reporte.completos || [];
+  const faltantes = reporte.faltantes || [];
+  const total     = completos.length + faltantes.length;
+
+  document.getElementById('stat-completos').textContent = completos.length;
+  document.getElementById('stat-faltantes').textContent = faltantes.length;
+  document.getElementById('stat-total').textContent     = total;
+
+  const porMateria = reporte.por_materia || {};
+
+  // Faltantes
+  if (faltantes.length) {
+    document.getElementById('seccion-faltantes').classList.remove('hidden');
+    const lista = document.getElementById('lista-faltantes');
+    lista.innerHTML = '';
+    Object.entries(porMateria).forEach(([mat, datos]) => {
+      if (!datos.faltantes.length) return;
+      const div = document.createElement('div');
+      div.innerHTML = `
+        <div class="text-sm font-medium text-on-surface mb-xs">${mat}</div>
+        <div class="flex flex-wrap gap-xs">
+          ${datos.faltantes.map(c =>
+            `<span class="px-sm py-xs bg-surface rounded-full text-xs border border-error/30 text-error">${c}</span>`
+          ).join('')}
+        </div>`;
+      lista.appendChild(div);
+    });
+  }
+
+  // Completos
+  if (completos.length) {
+    document.getElementById('seccion-completos').classList.remove('hidden');
+    const lista = document.getElementById('lista-completos');
+    lista.innerHTML = '';
+    Object.entries(porMateria).forEach(([mat, datos]) => {
+      if (!datos.completos.length) return;
+      const div = document.createElement('div');
+      div.innerHTML = `
+        <div class="text-sm font-medium text-on-surface mb-xs">${mat}</div>
+        <div class="flex flex-wrap gap-xs">
+          ${datos.completos.map(c =>
+            `<span class="px-sm py-xs bg-surface rounded-full text-xs border border-tertiary/30 text-on-surface">${c}</span>`
+          ).join('')}
+        </div>`;
+      lista.appendChild(div);
+    });
+  }
+}
+
+async function generarInformeIA() {
+  if (!reporteActual) return;
+
+  const btn = document.getElementById('btn-informe');
+  btn.disabled  = true;
+  btn.innerHTML = '<span class="material-symbols-outlined text-[16px] animate-spin">progress_activity</span> Generando...';
+
+  const informeDiv = document.getElementById('informe-ia');
+  informeDiv.innerHTML = '<span class="text-on-surface-variant">La IA está analizando los datos...</span>';
+
+  const completos  = reporteActual.completos || [];
+  const faltantes  = reporteActual.faltantes || [];
+  const porMateria = reporteActual.por_materia || {};
+
+  // Construir resumen para la IA
+  let resumenDatos = `Periodo ${reporteActual.periodo}, Bloque ${reporteActual.bloque}\n`;
+  resumenDatos += `Total revisados: ${completos.length + faltantes.length}\n`;
+  resumenDatos += `Con planeación: ${completos.length}\n`;
+  resumenDatos += `Sin planeación: ${faltantes.length}\n\n`;
+
+  resumenDatos += `DETALLE POR MATERIA:\n`;
+  Object.entries(porMateria).forEach(([mat, datos]) => {
+    resumenDatos += `\n${mat}:\n`;
+    if (datos.completos.length) resumenDatos += `  ✓ Con planeación: ${datos.completos.join(', ')}\n`;
+    if (datos.faltantes.length) resumenDatos += `  ✗ Sin planeación: ${datos.faltantes.join(', ')}\n`;
+  });
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1000,
+        system: `Eres un asistente académico del Colegio Humboldt. 
+Redacta informes ejecutivos claros y profesionales para coordinadores académicos.
+Usa un tono directo y constructivo. Responde siempre en español.`,
+        messages: [{
+          role: 'user',
+          content: `Con base en este reporte de verificación de planeaciones académicas, redacta un informe ejecutivo breve para la coordinación. 
+Incluye: resumen del estado general, materias o cursos con mayor incumplimiento, y una recomendación de acción.
+
+DATOS DEL REPORTE:
+${resumenDatos}`
+        }]
+      })
+    });
+
+    const data = await res.json();
+
+    if (data.content && data.content[0]) {
+      informeDiv.innerHTML = `<div class="text-sm text-on-surface whitespace-pre-wrap leading-relaxed">${data.content[0].text}</div>`;
+    } else if (data.error) {
+      informeDiv.innerHTML = `<div class="text-error text-sm">Error de API: ${data.error.message || 'Verifica tu API key en Perfil'}</div>`;
+    }
+  } catch(e) {
+    informeDiv.innerHTML = `<div class="text-error text-sm">Error de conexión con la IA.</div>`;
+  }
+
+  btn.disabled  = false;
+  btn.innerHTML = '<span class="material-symbols-outlined text-[16px]">smart_toy</span> Regenerar informe';
+}
+
+function exportarReporte() {
+  if (!reporteActual) return;
+  const p = reporteActual.periodo;
+  const b = reporteActual.bloque;
+  const faltantes  = reporteActual.faltantes || [];
+  const porMateria = reporteActual.por_materia || {};
+
+  let txt  = `REPORTE DE PLANEACIONES — Colegio Humboldt\n`;
+  txt += `Periodo ${p} — Bloque ${b}\n`;
+  txt += `Generado: ${new Date().toLocaleString('es-CO')}\n`;
+  txt += `${'─'.repeat(40)}\n\n`;
+  txt += `✓ Con planeación: ${reporteActual.completos.length}\n`;
+  txt += `✗ Sin planeación: ${faltantes.length}\n`;
+  txt += `Total: ${reporteActual.completos.length + faltantes.length}\n\n`;
+
+  if (faltantes.length) {
+    txt += `CURSOS SIN PLANEACIÓN:\n${'─'.repeat(40)}\n`;
+    Object.entries(porMateria).forEach(([mat, datos]) => {
+      if (datos.faltantes.length) txt += `${mat}: ${datos.faltantes.join(', ')}\n`;
+    });
+    txt += '\n';
+  }
+
+  txt += `CURSOS CON PLANEACIÓN:\n${'─'.repeat(40)}\n`;
+  Object.entries(porMateria).forEach(([mat, datos]) => {
+    if (datos.completos.length) txt += `${mat}: ${datos.completos.join(', ')}\n`;
+  });
+
+  const informeTexto = document.getElementById('informe-ia')?.innerText;
+  if (informeTexto && !informeTexto.includes('Presiona')) {
+    txt += `\n${'─'.repeat(40)}\nINFORME IA:\n${'─'.repeat(40)}\n${informeTexto}\n`;
+  }
+
+  const blob = new Blob([txt], {type: 'text/plain'});
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = `reporte_planeaciones_P${p}_B${b}.txt`;
+  a.click();
+}
+
+function nuevaVerificacion() {
+  document.getElementById('panel-reporte').classList.add('hidden');
+  document.getElementById('panel-progreso').classList.add('hidden');
+  document.getElementById('seccion-faltantes').classList.add('hidden');
+  document.getElementById('seccion-completos').classList.add('hidden');
+  document.getElementById('informe-ia').innerHTML = 'Presiona "Generar informe" para que la IA analice los resultados y redacte un resumen ejecutivo.';
+  reporteActual = null;
+}
+</script>
+{% endblock %}

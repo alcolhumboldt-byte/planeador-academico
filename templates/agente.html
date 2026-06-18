@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}Agente Autónomo{% endblock %}
+
+{% block body %}
+<div class="flex min-h-screen bg-surface">
+  {% include "layout.html" %}
+
+  <main class="flex-1 flex flex-col">
+    <!-- Top Bar -->
+    <header class="sticky top-0 z-40 bg-surface/80 backdrop-blur-md flex justify-between items-center h-16 px-lg w-full border-b border-outline-variant/20">
+      <div class="flex items-center gap-md">
+        <div class="p-sm bg-tertiary-fixed rounded-xl text-tertiary">
+          <span class="material-symbols-outlined">robot_2</span>
+        </div>
+        <div>
+          <h2 class="text-lg font-medium text-on-surface">Agente Autónomo</h2>
+          <p class="text-xs text-on-surface-variant">Automatiza tareas en la plataforma del colegio</p>
+        </div>
+      </div>
+      <div class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center text-primary font-bold text-sm">
+        {{ session.get('usuario', 'U')[0].upper() }}
+      </div>
+    </header>
+
+    <div class="p-lg md:p-xl max-w-4xl mx-auto w-full pb-20 md:pb-xl space-y-xl">
+
+      <!-- Instrucción -->
+      <section class="bg-surface-container-lowest rounded-[32px] border border-outline-variant/30 p-xl shadow-sm">
+        <h3 class="text-lg font-medium text-on-surface mb-xs">¿Qué quieres hacer?</h3>
+        <p class="text-sm text-on-surface-variant mb-lg">Escribe en lenguaje natural. El agente interpretará y ejecutará la tarea.</p>
+
+        <div class="relative flex items-end gap-sm bg-surface border border-outline-variant rounded-[20px] p-xs focus-within:ring-2 focus-within:ring-primary/20 transition-all">
+          <textarea id="instruccion" rows="3" placeholder="Ej: Envía un comunicado a todos los cursos de secundaria avisando que mañana no hay clase de música..."
+            class="flex-1 border-none focus:ring-0 bg-transparent py-md px-sm text-sm resize-none"
+            oninput="this.style.height='';this.style.height=this.scrollHeight+'px'"></textarea>
+          <div class="flex items-center gap-xs pr-xs pb-xs">
+            <button id="mic-agente" onclick="toggleVozAgente()"
+              class="w-10 h-10 flex items-center justify-center bg-secondary-container text-primary rounded-full hover:bg-primary-container transition-all">
+              <span class="material-symbols-outlined text-[18px]" id="mic-agente-icon" style="font-variation-settings:'FILL' 1">mic</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Sugerencias -->
+        <div class="flex gap-sm mt-md overflow-x-auto pb-xs" style="scrollbar-width:none">
+          <button onclick="document.getElementById('instruccion').value='Envía un comunicado a todos los cursos de primaria avisando que la clase de música tendrá presentación especial esta semana'"
+            class="px-md py-xs bg-surface-container-high rounded-full text-xs flex-shrink-0 hover:bg-primary-fixed transition-colors">
+            📢 Comunicado primaria
+          </button>
+          <button onclick="document.getElementById('instruccion').value='Envía recordatorio a todos los cursos sobre la entrega de instrumentos prestados'"
+            class="px-md py-xs bg-surface-container-high rounded-full text-xs flex-shrink-0 hover:bg-primary-fixed transition-colors">
+            🎵 Recordatorio instrumentos
+          </button>
+          <button onclick="document.getElementById('instruccion').value='Avisa a todos los cursos que el ensayo de la semana cultural es el viernes a las 2pm'"
+            class="px-md py-xs bg-surface-container-high rounded-full text-xs flex-shrink-0 hover:bg-primary-fixed transition-colors">
+            📅 Semana cultural
+          </button>
+        </div>
+
+        <button onclick="interpretarInstruccion()"
+          class="mt-lg w-full bg-primary text-on-primary py-md rounded-full text-sm font-medium hover:opacity-90 transition-all flex items-center justify-center gap-sm shadow-lg active:scale-95">
+          <span class="material-symbols-outlined">auto_awesome</span>
+          Interpretar instrucción
+        </button>
+      </section>
+
+      <!-- Plan generado -->
+      <section id="seccion-plan" class="hidden bg-surface-container-lowest rounded-[32px] border border-outline-variant/30 p-xl shadow-sm">
+        <div class="flex items-center justify-between mb-lg">
+          <div class="flex items-center gap-md">
+            <span class="material-symbols-outlined text-primary">checklist</span>
+            <h3 class="text-lg font-medium text-on-surface">Plan de ejecución</h3>
+          </div>
+          <span class="bg-primary-fixed text-on-primary-fixed px-sm py-xs rounded-full text-xs font-medium" id="plan-conteo">0 tareas</span>
+        </div>
+        <div id="lista-tareas" class="space-y-md mb-xl"></div>
+        <div class="flex gap-sm">
+          <button onclick="document.getElementById('seccion-plan').classList.add('hidden')"
+            class="flex-1 border border-outline text-on-surface py-md rounded-xl text-sm hover:bg-surface-variant transition-colors">
+            Cancelar
+          </button>
+          <button onclick="ejecutarPlan()"
+            class="flex-1 bg-tertiary text-on-tertiary py-md rounded-xl text-sm font-medium hover:opacity-90 transition-all flex items-center justify-center gap-xs shadow-md">
+            <span class="material-symbols-outlined text-[16px]">play_arrow</span>
+            Ejecutar plan
+          </button>
+        </div>
+      </section>
+
+      <!-- Progreso -->
+      <section id="seccion-progreso" class="hidden bg-surface-container-lowest rounded-[32px] border border-outline-variant/30 p-xl shadow-sm">
+        <div class="flex items-center gap-md mb-lg">
+          <div class="w-8 h-8 rounded-full border-4 border-primary border-t-transparent animate-spin"></div>
+          <h3 class="text-lg font-medium text-on-surface">Ejecutando tareas...</h3>
+        </div>
+        <div id="logs-agente" class="bg-surface-container rounded-xl p-md font-mono text-xs space-y-xs max-h-64 overflow-y-auto"></div>
+      </section>
+
+      <!-- Resultado -->
+      <section id="seccion-resultado" class="hidden bg-tertiary-fixed rounded-[32px] border border-outline-variant/30 p-xl shadow-sm">
+        <div class="flex items-center gap-md mb-md">
+          <span class="material-symbols-outlined text-tertiary text-[28px]" style="font-variation-settings:'FILL' 1">check_circle</span>
+          <h3 class="text-lg font-medium text-on-surface">Tareas completadas</h3>
+        </div>
+        <div id="resumen-resultado" class="text-sm text-on-surface"></div>
+        <button onclick="resetAgente()" class="mt-lg bg-primary text-on-primary px-xl py-md rounded-full text-sm font-medium hover:opacity-90 transition-all">
+          Nueva tarea
+        </button>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<script>
+let planActual = null;
+let sessionId = null;
+
+async function interpretarInstruccion() {
+  const instruccion = document.getElementById('instruccion').value.trim();
+  if (!instruccion) return;
+
+  const btn = event.target;
+  btn.disabled = true;
+  btn.innerHTML = '<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mx-auto"></div>';
+
+  try {
+    const res = await fetch('/api/agente/interpretar', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({instruccion})
+    });
+    const data = await res.json();
+
+    if (data.ok && data.tareas) {
+      planActual = data.tareas;
+      mostrarPlan(data.tareas);
+    } else {
+      alert(data.error || 'No se pudo interpretar la instrucción');
+    }
+  } catch(e) {
+    alert('Error de conexión');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span class="material-symbols-outlined">auto_awesome</span> Interpretar instrucción';
+  }
+}
+
+function mostrarPlan(tareas) {
+  const lista = document.getElementById('lista-tareas');
+  const conteo = document.getElementById('plan-conteo');
+  lista.innerHTML = '';
+  conteo.textContent = `${tareas.length} tarea${tareas.length !== 1 ? 's' : ''}`;
+
+  tareas.forEach((t, i) => {
+    const div = document.createElement('div');
+    div.className = 'p-md bg-surface-container-low rounded-xl border border-outline-variant/20 flex items-start gap-md';
+    div.innerHTML = `
+      <span class="w-6 h-6 rounded-full bg-primary-container text-primary text-xs flex items-center justify-center font-bold flex-shrink-0 mt-xs">${i+1}</span>
+      <div class="flex-1">
+        <p class="text-sm font-medium text-on-surface">${t.tipo === 'comunicado' ? '📢 Comunicado' : t.tipo}</p>
+        <p class="text-xs text-on-surface-variant mt-xs">${t.cursos ? 'Cursos: ' + t.cursos.join(', ') : ''}</p>
+        ${t.mensaje ? `<p class="text-xs text-on-surface mt-xs bg-surface p-sm rounded-lg">${t.mensaje.substring(0, 120)}${t.mensaje.length > 120 ? '...' : ''}</p>` : ''}
+      </div>`;
+    lista.appendChild(div);
+  });
+
+  document.getElementById('seccion-plan').classList.remove('hidden');
+  document.getElementById('seccion-plan').scrollIntoView({behavior: 'smooth'});
+}
+
+async function ejecutarPlan() {
+  if (!planActual) return;
+
+  document.getElementById('seccion-plan').classList.add('hidden');
+  document.getElementById('seccion-progreso').classList.remove('hidden');
+  document.getElementById('seccion-progreso').scrollIntoView({behavior: 'smooth'});
+
+  sessionId = Date.now().toString();
+
+  try {
+    const res = await fetch('/api/agente/ejecutar', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({tareas: planActual, session_id: sessionId})
+    });
+    const data = await res.json();
+
+    if (data.ok) {
+      iniciarPolling();
+    } else {
+      document.getElementById('seccion-progreso').classList.add('hidden');
+      alert(data.error || 'Error al ejecutar');
+    }
+  } catch(e) {
+    document.getElementById('seccion-progreso').classList.add('hidden');
+    alert('Error de conexión');
+  }
+}
+
+function iniciarPolling() {
+  const logs = document.getElementById('logs-agente');
+  const interval = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/agente/progreso/${sessionId}`);
+      const data = await res.json();
+
+      if (data.logs) {
+        logs.innerHTML = data.logs.map(l => `<div class="text-on-surface-variant">${l}</div>`).join('');
+        logs.scrollTop = logs.scrollHeight;
+      }
+
+      if (data.terminado) {
+        clearInterval(interval);
+        document.getElementById('seccion-progreso').classList.add('hidden');
+        document.getElementById('seccion-resultado').classList.remove('hidden');
+        document.getElementById('resumen-resultado').innerHTML = data.resumen || 'Todas las tareas completadas exitosamente.';
+        document.getElementById('seccion-resultado').scrollIntoView({behavior: 'smooth'});
+      }
+    } catch(e) {
+      clearInterval(interval);
+    }
+  }, 1500);
+}
+
+function resetAgente() {
+  planActual = null;
+  sessionId = null;
+  document.getElementById('instruccion').value = '';
+  document.getElementById('seccion-plan').classList.add('hidden');
+  document.getElementById('seccion-progreso').classList.add('hidden');
+  document.getElementById('seccion-resultado').classList.add('hidden');
+  document.getElementById('logs-agente').innerHTML = '';
+}
+
+function toggleVozAgente() {
+  // Integración con voz.js existente
+  const icon = document.getElementById('mic-agente-icon');
+  const btn = document.getElementById('mic-agente');
+  if (icon.innerText === 'mic') {
+    icon.innerText = 'stop';
+    btn.classList.add('bg-error-container', 'text-error');
+    btn.classList.remove('bg-secondary-container', 'text-primary');
+  } else {
+    icon.innerText = 'mic';
+    btn.classList.remove('bg-error-container', 'text-error');
+    btn.classList.add('bg-secondary-container', 'text-primary');
+  }
+}
+</script>
+{% endblock %}

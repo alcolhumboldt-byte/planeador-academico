@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+{% block title %}Iniciar sesión{% endblock %}
+
+{% block body %}
+<div class="fixed inset-0 overflow-hidden pointer-events-none opacity-40">
+  <div class="absolute top-[-10%] left-[-5%] w-[400px] h-[400px] bg-primary/5 rounded-full blur-[80px]"></div>
+  <div class="absolute bottom-[-10%] right-[-5%] w-[400px] h-[400px] bg-primary/5 rounded-full blur-[80px]"></div>
+</div>
+
+<div class="min-h-screen flex items-center justify-center p-md bg-surface relative z-10">
+  <main class="w-full max-w-[440px]">
+
+    <!-- Logo -->
+    <div class="text-center mb-xl">
+      <div class="inline-flex items-center justify-center w-16 h-16 bg-primary rounded-2xl mb-md shadow-lg shadow-primary/20">
+        <img src="/static/img/icon_planeador.png" class="w-10 h-10 object-contain rounded-xl" alt="Planeador"/>
+      </div>
+      <h1 class="text-3xl font-bold text-primary mb-xs">Planeador Académico</h1>
+      <p class="text-sm text-on-surface-variant italic">Colegio Humboldt</p>
+    </div>
+
+    <!-- Card Login -->
+    <section id="card-login" class="bg-surface-container-lowest rounded-3xl p-xl border border-outline-variant/30 shadow-sm">
+      <header class="mb-lg">
+        <h2 class="text-xl font-medium text-on-surface">Bienvenido de vuelta</h2>
+        <p class="text-sm text-on-surface-variant mt-1">Ingresa tus credenciales para acceder.</p>
+      </header>
+
+      <div id="msg-login" class="hidden mb-lg px-md py-sm bg-error-container text-on-error-container rounded-xl text-sm flex items-center gap-sm">
+        <span class="material-symbols-outlined text-[18px]">error</span>
+        <span id="msg-login-texto"></span>
+      </div>
+
+      <div class="space-y-lg">
+        <!-- Nombre -->
+        <div class="space-y-xs">
+          <label class="block text-sm font-medium text-on-surface-variant px-xs" for="nombre">Tu nombre</label>
+          <div class="relative group">
+            <div class="absolute inset-y-0 left-0 pl-md flex items-center pointer-events-none">
+              <span class="material-symbols-outlined text-outline group-focus-within:text-primary transition-colors">person</span>
+            </div>
+            <input id="nombre" name="nombre" type="text" required
+              class="block w-full pl-[48px] pr-md py-sm bg-surface border border-outline-variant rounded-xl text-sm text-on-surface placeholder:text-outline/60 focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+              placeholder="Nombre completo"/>
+          </div>
+        </div>
+
+        <!-- Contraseña -->
+        <div class="space-y-xs">
+          <label class="block text-sm font-medium text-on-surface-variant px-xs" for="password">Contraseña</label>
+          <div class="relative group">
+            <div class="absolute inset-y-0 left-0 pl-md flex items-center pointer-events-none">
+              <span class="material-symbols-outlined text-outline group-focus-within:text-primary transition-colors">lock</span>
+            </div>
+            <input id="password" name="password" type="password" required
+              class="block w-full pl-[48px] pr-[48px] py-sm bg-surface border border-outline-variant rounded-xl text-sm text-on-surface placeholder:text-outline/60 focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+              placeholder="••••••••"/>
+            <button type="button" onclick="togglePassword()"
+              class="absolute inset-y-0 right-0 pr-md flex items-center text-outline hover:text-on-surface-variant transition-colors">
+              <span class="material-symbols-outlined" id="pass-icon">visibility</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Botón login -->
+        <button onclick="hacerLogin()"
+          class="w-full bg-primary text-on-primary hover:opacity-90 transition-all py-sm px-lg rounded-full font-medium shadow-md active:scale-[0.98] flex items-center justify-center gap-base">
+          <span>Entrar</span>
+          <span class="material-symbols-outlined">login</span>
+        </button>
+      </div>
+
+      <footer class="mt-xl pt-xl border-t border-outline-variant/30 text-center">
+        <p class="text-sm text-on-surface-variant">
+          ¿Primera vez aquí?
+          <button onclick="mostrarRegistro()" class="text-primary font-bold hover:underline">Crear perfil</button>
+        </p>
+      </footer>
+    </section>
+
+    <!-- Card Registro (oculta por defecto) -->
+    <section id="card-registro" class="hidden bg-surface-container-lowest rounded-3xl p-xl border border-outline-variant/30 shadow-sm">
+      <header class="mb-lg">
+        <h2 class="text-xl font-medium text-on-surface">Crear perfil</h2>
+        <p class="text-sm text-on-surface-variant mt-1">Ingresa tu nombre y elige una contraseña.</p>
+      </header>
+
+      <div id="msg-registro" class="hidden mb-lg px-md py-sm bg-error-container text-on-error-container rounded-xl text-sm flex items-center gap-sm">
+        <span class="material-symbols-outlined text-[18px]">error</span>
+        <span id="msg-registro-texto"></span>
+      </div>
+
+      <div class="space-y-lg">
+        <!-- Nombre -->
+        <div class="space-y-xs">
+          <label class="block text-sm font-medium text-on-surface-variant px-xs" for="reg-nombre">Tu nombre completo</label>
+          <div class="relative group">
+            <div class="absolute inset-y-0 left-0 pl-md flex items-center pointer-events-none">
+              <span class="material-symbols-outlined text-outline group-focus-within:text-primary transition-colors">person</span>
+            </div>
+            <input id="reg-nombre" type="text" required
+              class="block w-full pl-[48px] pr-md py-sm bg-surface border border-outline-variant rounded-xl text-sm text-on-surface placeholder:text-outline/60 focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+              placeholder="Ej: Andres Felipe Leal"/>
+          </div>
+        </div>
+
+        <!-- Contraseña -->
+        <div class="space-y-xs">
+          <label class="block text-sm font-medium text-on-surface-variant px-xs" for="reg-password">Contraseña</label>
+          <div class="relative group">
+            <div class="absolute inset-y-0 left-0 pl-md flex items-center pointer-events-none">
+              <span class="material-symbols-outlined text-outline group-focus-within:text-primary transition-colors">lock</span>
+            </div>
+            <input id="reg-password" type="password" required
+              class="block w-full pl-[48px] pr-md py-sm bg-surface border border-outline-variant rounded-xl text-sm text-on-surface placeholder:text-outline/60 focus:ring-2 focus:ring-primary focus:border-primary transition-all"
+              placeholder="Mínimo 6 caracteres"/>
+          </div>
+        </div>
+
+        <div class="space-y-xs">
+          <label class="block text-sm font-medium text-on-surface-variant px-xs">Rol</label>
+          <div class="relative group">
+            <div class="absolute inset-y-0 left-0 pl-md flex items-center pointer-events-none">
+              <span class="material-symbols-outlined text-outline group-focus-within:text-primary transition-colors">badge</span>
+            </div>
+            <select id="reg-rol"
+              class="block w-full pl-[48px] pr-md py-sm bg-surface border border-outline-variant rounded-xl text-sm text-on-surface focus:ring-2 focus:ring-primary focus:border-primary transition-all">
+              <option value="profesor">Profesor</option>
+              <option value="coordinador">Coordinador</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Botón registrar -->
+        <button onclick="hacerRegistro()"
+          class="w-full bg-primary text-on-primary hover:opacity-90 transition-all py-sm px-lg rounded-full font-medium shadow-md active:scale-[0.98] flex items-center justify-center gap-base">
+          <span>Crear perfil</span>
+          <span class="material-symbols-outlined">person_add</span>
+        </button>
+      </div>
+
+      <footer class="mt-xl pt-xl border-t border-outline-variant/30 text-center">
+        <p class="text-sm text-on-surface-variant">
+          ¿Ya tienes cuenta?
+          <button onclick="mostrarLogin()" class="text-primary font-bold hover:underline">Iniciar sesión</button>
+        </p>
+      </footer>
+    </section>
+
+    <!-- Quote -->
+    <div class="mt-xl rounded-3xl bg-surface-container-low p-lg text-center">
+      <p class="text-sm text-on-surface-variant italic">"El arte de enseñar es el arte de asistir el descubrimiento."</p>
+    </div>
+
+  </main>
+</div>
+
+<script>
+function togglePassword() {
+  const input = document.getElementById('password');
+  const icon = document.getElementById('pass-icon');
+  if (input.type === 'password') {
+    input.type = 'text';
+    icon.innerText = 'visibility_off';
+  } else {
+    input.type = 'password';
+    icon.innerText = 'visibility';
+  }
+}
+
+function mostrarRegistro() {
+  document.getElementById('card-login').classList.add('hidden');
+  document.getElementById('card-registro').classList.remove('hidden');
+}
+
+function mostrarLogin() {
+  document.getElementById('card-registro').classList.add('hidden');
+  document.getElementById('card-login').classList.remove('hidden');
+}
+
+async function hacerLogin() {
+  const nombre   = document.getElementById('nombre').value.trim();
+  const password = document.getElementById('password').value;
+  const msgDiv   = document.getElementById('msg-login');
+  const msgTexto = document.getElementById('msg-login-texto');
+
+  if (!nombre || !password) {
+    msgTexto.innerText = 'Completa todos los campos.';
+    msgDiv.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    const res  = await fetch('/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ nombre, password })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      window.location.href = '/dashboard';
+    } else {
+      msgTexto.innerText = data.error || 'Error al iniciar sesión.';
+      msgDiv.classList.remove('hidden');
+    }
+  } catch(e) {
+    msgTexto.innerText = 'Error de conexión.';
+    msgDiv.classList.remove('hidden');
+  }
+}
+
+async function hacerRegistro() {
+  const nombre   = document.getElementById('reg-nombre').value.trim();
+  const password = document.getElementById('reg-password').value;
+  const rol = document.getElementById('reg-rol').value;
+  const msgDiv   = document.getElementById('msg-registro');
+  const msgTexto = document.getElementById('msg-registro-texto');
+
+  if (!nombre || !password) {
+    msgTexto.innerText = 'Completa todos los campos.';
+    msgDiv.classList.remove('hidden');
+    return;
+  }
+  if (password.length < 6) {
+    msgTexto.innerText = 'La contraseña debe tener al menos 6 caracteres.';
+    msgDiv.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    const res  = await fetch('/registro', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ nombre, password })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      window.location.href = '/dashboard';
+    } else {
+      msgTexto.innerText = data.error || 'Error al crear el perfil.';
+      msgDiv.classList.remove('hidden');
+    }
+  } catch(e) {
+    msgTexto.innerText = 'Error de conexión.';
+    msgDiv.classList.remove('hidden');
+  }
+}
+
+// Permitir Enter en los campos
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('password').addEventListener('keydown', e => {
+    if (e.key === 'Enter') hacerLogin();
+  });
+  document.getElementById('nombre').addEventListener('keydown', e => {
+    if (e.key === 'Enter') hacerLogin();
+  });
+  document.getElementById('reg-password').addEventListener('keydown', e => {
+    if (e.key === 'Enter') hacerRegistro();
+  });
+});
+</script>
+{% endblock %}

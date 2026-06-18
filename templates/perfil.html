@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block title %}Perfil{% endblock %}
+
+{% block body %}
+<div class="flex min-h-screen bg-surface">
+  {% include "layout.html" %}
+
+  <main class="flex-1 flex flex-col">
+    <!-- Top Bar -->
+    <header class="sticky top-0 z-40 bg-surface/80 backdrop-blur-md flex justify-between items-center h-16 px-lg w-full border-b border-outline-variant/20">
+      <h2 class="text-lg font-medium text-on-surface">Configuración de perfil</h2>
+      <div class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center text-primary font-bold text-sm">
+        {{ session.get('usuario', 'U')[0].upper() }}
+      </div>
+    </header>
+
+    <div class="max-w-4xl mx-auto py-2xl px-lg w-full pb-20 md:pb-2xl">
+      <div class="mb-xl flex items-end justify-between gap-md flex-wrap">
+        <div>
+          <h2 class="text-3xl font-bold text-primary">Mi perfil</h2>
+          <p class="text-on-surface-variant text-base mt-xs">Gestiona tus credenciales y configuración.</p>
+        </div>
+      </div>
+
+      {% if mensaje %}
+      <div class="mb-lg px-md py-sm bg-tertiary-fixed text-on-tertiary-fixed rounded-xl text-sm flex items-center gap-sm">
+        <span class="material-symbols-outlined text-[18px]">check_circle</span>{{ mensaje }}
+      </div>
+      {% endif %}
+      {% if error %}
+      <div class="mb-lg px-md py-sm bg-error-container text-on-error-container rounded-xl text-sm flex items-center gap-sm">
+        <span class="material-symbols-outlined text-[18px]">error</span>{{ error }}
+      </div>
+      {% endif %}
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-lg">
+
+        <!-- Columna izquierda -->
+        <section class="md:col-span-2 space-y-lg">
+
+          <!-- Información personal -->
+          <div class="bg-surface-container-lowest border border-outline-variant/30 p-xl rounded-[32px] shadow-sm">
+            <div class="flex items-center gap-md mb-xl">
+              <div class="bg-primary-container p-sm rounded-xl">
+                <span class="material-symbols-outlined text-on-primary-container">badge</span>
+              </div>
+              <h3 class="text-lg font-medium text-on-surface">Información personal</h3>
+            </div>
+            <form method="POST" action="/api/perfil/actualizar" class="space-y-lg">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-lg">
+                <div class="space-y-xs">
+                  <label class="text-sm font-medium text-on-surface-variant">Nombre completo</label>
+                  <input name="nombre_display" type="text" value="{{ session.get('usuario', '') }}" readonly
+                    class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface-container-low text-on-surface-variant cursor-not-allowed"/>
+                </div>
+                <div class="space-y-xs">
+                  <label class="text-sm font-medium text-on-surface-variant">Rol</label>
+                  <input type="text" value="{{ 'Coordinador' if session.get('es_coordinador') else 'Profesor' }}" readonly
+                    class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface-container-low text-on-surface-variant cursor-not-allowed"/>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          <!-- Cambiar contraseña -->
+          <div class="bg-surface-container-lowest border border-outline-variant/30 p-xl rounded-[32px] shadow-sm">
+            <div class="flex items-center gap-md mb-xl">
+              <div class="bg-secondary-container p-sm rounded-xl">
+                <span class="material-symbols-outlined text-on-secondary-container">lock</span>
+              </div>
+              <h3 class="text-lg font-medium text-on-surface">Cambiar contraseña</h3>
+            </div>
+            <form method="POST" action="/api/perfil/cambiar_password" class="space-y-lg">
+              <div class="space-y-xs">
+                <label class="text-sm font-medium text-on-surface-variant">Contraseña actual</label>
+                <input name="actual" type="password" required
+                  class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary"/>
+              </div>
+              <div class="space-y-xs">
+                <label class="text-sm font-medium text-on-surface-variant">Nueva contraseña</label>
+                <input name="nueva" type="password" required
+                  class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary"/>
+              </div>
+              <button type="submit"
+                class="bg-primary text-on-primary px-xl py-md rounded-full text-sm font-medium hover:opacity-90 transition-all flex items-center gap-xs">
+                <span class="material-symbols-outlined text-[16px]">save</span>
+                Actualizar contraseña
+              </button>
+            </form>
+          </div>
+
+          <!-- Credenciales del colegio -->
+          <div class="bg-surface-container-lowest border border-outline-variant/30 p-xl rounded-[32px] shadow-sm">
+            <div class="flex items-center gap-md mb-xl">
+              <div class="bg-primary-fixed p-sm rounded-xl">
+                <span class="material-symbols-outlined text-primary">school</span>
+              </div>
+              <div>
+                <h3 class="text-lg font-medium text-on-surface">Credenciales del colegio</h3>
+                <p class="text-xs text-on-surface-variant">Para publicar planeaciones automáticamente en controlacademico.com</p>
+              </div>
+            </div>
+            <form method="POST" action="/api/perfil/credenciales" class="space-y-lg">
+              <div class="space-y-xs">
+                <label class="text-sm font-medium text-on-surface-variant">Usuario de controlacademico.com</label>
+                <input name="colegio_usuario" type="text" placeholder="Tu usuario en la plataforma"
+                  value="{{ colegio_usuario_hint or '' }}"
+                  class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary"/>
+              </div>
+              <div class="space-y-xs">
+                <label class="text-sm font-medium text-on-surface-variant">Contraseña de la plataforma</label>
+                <div class="relative">
+                  <input name="colegio_password" type="password" id="colegio-pass" placeholder="••••••••"
+                    class="w-full rounded-xl border border-outline-variant py-md px-md pr-[48px] text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary"/>
+                  <button type="button" onclick="togglePass('colegio-pass','colegio-pass-icon')"
+                    class="absolute inset-y-0 right-0 pr-md flex items-center text-outline">
+                    <span class="material-symbols-outlined text-[18px]" id="colegio-pass-icon">visibility</span>
+                  </button>
+                </div>
+              </div>
+              <div class="flex items-center gap-sm p-md bg-primary-fixed/30 rounded-xl text-xs text-on-primary-fixed">
+                <span class="material-symbols-outlined text-primary text-[16px]">encrypted</span>
+                Las credenciales se guardan encriptadas con Fernet. Nadie más puede leerlas.
+              </div>
+              <button type="submit"
+                class="bg-primary text-on-primary px-xl py-md rounded-full text-sm font-medium hover:opacity-90 transition-all flex items-center gap-xs">
+                <span class="material-symbols-outlined text-[16px]">save</span>
+                Guardar credenciales
+              </button>
+            </form>
+          </div>
+        </section>
+
+        <!-- Columna derecha -->
+        <aside class="space-y-lg">
+          <!-- Avatar -->
+          <div class="bg-surface-container-lowest border border-outline-variant/30 p-xl rounded-[32px] shadow-sm text-center">
+            <div class="w-24 h-24 rounded-full bg-primary-container flex items-center justify-center text-primary text-4xl font-bold mx-auto mb-md">
+              {{ session.get('usuario', 'U')[0].upper() }}
+            </div>
+            <h4 class="font-medium text-sm text-on-surface">{{ session.get('usuario', '') }}</h4>
+            <p class="text-xs text-on-surface-variant">{{ 'Coordinador' if session.get('es_coordinador') else 'Profesor' }}</p>
+          </div>
+
+          <!-- API Key -->
+          <div class="bg-surface-container-lowest border border-outline-variant/30 p-xl rounded-[32px] shadow-sm">
+            <div class="flex items-center gap-md mb-lg">
+              <div class="bg-tertiary-fixed p-sm rounded-xl text-tertiary">
+                <span class="material-symbols-outlined">key</span>
+              </div>
+              <h3 class="text-base font-medium text-on-surface">API Key de IA</h3>
+            </div>
+            <form method="POST" action="/api/perfil/api_key" class="space-y-md">
+              <div class="relative">
+                <input name="api_key" type="password" id="api-key-input"
+                  placeholder="sk-ant-..."
+                  value="{{ api_key_hint or '' }}"
+                  class="w-full rounded-xl border border-outline-variant py-sm px-md pr-[40px] text-xs bg-surface focus:ring-2 focus:ring-primary focus:border-primary font-mono"/>
+                <button type="button" onclick="togglePass('api-key-input','api-key-icon')"
+                  class="absolute inset-y-0 right-0 pr-sm flex items-center text-outline">
+                  <span class="material-symbols-outlined text-[16px]" id="api-key-icon">visibility</span>
+                </button>
+              </div>
+              <button type="submit"
+                class="w-full bg-tertiary text-on-tertiary py-sm rounded-xl text-sm font-medium hover:opacity-90 transition-all">
+                Guardar API Key
+              </button>
+            </form>
+          </div>
+
+          <!-- Seguridad -->
+          <div class="bg-inverse-surface text-inverse-on-surface p-xl rounded-[32px] shadow-xl">
+            <div class="flex items-center gap-md mb-lg">
+              <span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1">encrypted</span>
+              <h3 class="text-base font-medium">Seguridad</h3>
+            </div>
+            <div class="space-y-sm">
+              <a href="/logout"
+                class="w-full bg-white/10 hover:bg-white/20 text-inverse-on-surface border border-white/20 py-sm rounded-xl transition-colors flex items-center justify-center gap-sm text-sm">
+                <span class="material-symbols-outlined text-[16px]">logout</span>
+                Cerrar sesión
+              </a>
+            </div>
+            <p class="text-xs opacity-50 mt-lg">Datos encriptados en reposo y en tránsito.</p>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+function togglePass(inputId, iconId) {
+  const input = document.getElementById(inputId);
+  const icon = document.getElementById(iconId);
+  if (input.type === 'password') {
+    input.type = 'text';
+    icon.innerText = 'visibility_off';
+  } else {
+    input.type = 'password';
+    icon.innerText = 'visibility';
+  }
+}
+</script>
+{% endblock %}

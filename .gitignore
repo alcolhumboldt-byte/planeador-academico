@@ -1,0 +1,31 @@
+# ─────────────────────────────────────────────
+# ARCHIVOS QUE NUNCA DEBEN SUBIRSE A GITHUB
+# ─────────────────────────────────────────────
+
+# Variables de entorno con claves secretas
+.env
+
+# Datos de usuarios y planeaciones
+planeador_academico/
+*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs
+*.log

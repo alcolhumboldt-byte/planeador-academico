@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Sombra del libro -->
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#001a5e" flood-opacity="0.35"/>
+    </filter>
+    <!-- Brillo del rayo -->
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Sombra/profundidad del libro (capa trasera) -->
+  <path d="M108 310 Q108 370 145 390 L256 412 L367 390 Q404 370 404 310 L404 185 Q404 165 390 158 L256 138 L122 158 Q108 165 108 185 Z"
+        fill="#0d2f7a" opacity="0.6"/>
+
+  <!-- Página izquierda del libro -->
+  <path d="M130 195 Q130 175 150 168 L248 152 L248 400 Q200 388 162 378 Q130 368 130 340 Z"
+        fill="#1a4db5" filter="url(#shadow)"/>
+
+  <!-- Página derecha del libro -->
+  <path d="M382 195 Q382 175 362 168 L264 152 L264 400 Q312 388 350 378 Q382 368 382 340 Z"
+        fill="#2358c8" filter="url(#shadow)"/>
+
+  <!-- Lomo central / spine -->
+  <path d="M248 152 L264 152 L264 400 L248 400 Z" fill="#0f3a9e"/>
+
+  <!-- Páginas inferiores del libro (líneas) -->
+  <path d="M148 360 Q148 380 180 388 L248 400 L256 402 L264 400 L332 388 Q364 380 364 360"
+        fill="none" stroke="#0a2870" stroke-width="3" stroke-linecap="round"/>
+  <path d="M152 348 Q152 366 182 374 L248 386 L256 388 L264 386 L330 374 Q360 366 360 348"
+        fill="none" stroke="#0a2870" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M156 338 Q156 354 184 362 L248 373 L256 375 L264 373 L328 362 Q356 354 356 338"
+        fill="none" stroke="#0a2870" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Punto inferior del libro -->
+  <path d="M248 400 Q252 412 256 416 Q260 412 264 400 Z" fill="#0f3a9e"/>
+
+  <!-- === RAYO === -->
+  <!-- Sombra del rayo -->
+  <polygon points="272,108 238,248 262,248 228,390 298,218 270,218 305,108"
+           fill="#c45000" opacity="0.3" transform="translate(4,6)"/>
+  <!-- Rayo principal -->
+  <polygon points="272,108 238,248 262,248 228,390 298,218 270,218 305,108"
+           fill="url(#rayoGrad)" filter="url(#glow)"/>
+  <defs>
+    <linearGradient id="rayoGrad" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#FFD020"/>
+      <stop offset="55%" stop-color="#FF8800"/>
+      <stop offset="100%" stop-color="#E05000"/>
+    </linearGradient>
+  </defs>
+
+  <!-- === DESTELLOS alrededor del rayo === -->
+  <!-- Destello superior izquierda -->
+  <rect x="148" y="140" width="32" height="11" rx="5.5"
+        fill="#FF6600" transform="rotate(-30 164 146)"/>
+  <!-- Destello superior derecha -->
+  <rect x="330" y="140" width="32" height="11" rx="5.5"
+        fill="#FF8800" transform="rotate(30 346 146)"/>
+  <!-- Destello izquierda medio -->
+  <rect x="136" y="200" width="26" height="10" rx="5"
+        fill="#FF5500" transform="rotate(-15 149 205)"/>
+  <!-- Destello derecha medio -->
+  <rect x="348" y="200" width="26" height="10" rx="5"
+        fill="#FF7700" transform="rotate(15 361 205)"/>
+</svg>

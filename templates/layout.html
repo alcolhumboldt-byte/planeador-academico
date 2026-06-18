@@ -1,0 +1,123 @@
+{% set pagina_actual = request.endpoint %}
+
+<!-- SIDEBAR DESKTOP -->
+<aside style="width:220px;min-width:220px;height:100vh;position:sticky;top:0;left:0;display:flex;flex-direction:column;background:#0A0F1E;z-index:50;">
+
+  <!-- Logo -->
+  <div style="padding:20px 18px 16px;border-bottom:0.5px solid rgba(255,255,255,0.07);margin-bottom:8px;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div style="width:32px;height:32px;background:linear-gradient(135deg,#3B6BF5,#6C47FF);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <img src="/static/img/icon_planeador.png" style="width:20px;height:20px;object-fit:contain;border-radius:4px;" alt="Logo"/>
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:700;color:#fff;line-height:1.2;">Planeador Pro</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:1px;">Colegio Humboldt</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Nav principal -->
+  <nav style="flex:1;padding:4px 10px;overflow-y:auto;">
+    <div style="font-size:9px;font-weight:700;letter-spacing:0.08em;color:rgba(255,255,255,0.25);padding:8px 8px 4px;text-transform:uppercase;">Principal</div>
+
+    <a href="/dashboard" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:1px;text-decoration:none;transition:all 0.15s;
+      {% if pagina_actual == 'dashboard' %}background:rgba(59,107,245,0.18);{% endif %}">
+      <span class="material-symbols-outlined" style="font-size:18px;{% if pagina_actual == 'dashboard' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.35);{% endif %}" {% if pagina_actual == 'dashboard' %}style="font-variation-settings:'FILL' 1"{% endif %}>dashboard</span>
+      <span style="font-size:12.5px;font-weight:500;{% if pagina_actual == 'dashboard' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.45);{% endif %}">Dashboard</span>
+    </a>
+
+    <a href="/planear" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:1px;text-decoration:none;transition:all 0.15s;
+      {% if pagina_actual == 'planear' %}background:rgba(59,107,245,0.18);{% endif %}">
+      <span class="material-symbols-outlined" style="font-size:18px;{% if pagina_actual == 'planear' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.35);{% endif %}">event_note</span>
+      <span style="font-size:12.5px;font-weight:500;{% if pagina_actual == 'planear' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.45);{% endif %}">Planeador</span>
+    </a>
+
+    <a href="/asistente" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:1px;text-decoration:none;transition:all 0.15s;
+      {% if pagina_actual == 'asistente' %}background:rgba(59,107,245,0.18);{% endif %}">
+      <span class="material-symbols-outlined" style="font-size:18px;{% if pagina_actual == 'asistente' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.35);{% endif %}">smart_toy</span>
+      <span style="font-size:12.5px;font-weight:500;{% if pagina_actual == 'asistente' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.45);{% endif %}">Asistente IA</span>
+    </a>
+
+    <a href="/periodos" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:1px;text-decoration:none;transition:all 0.15s;
+      {% if pagina_actual == 'periodos' %}background:rgba(59,107,245,0.18);{% endif %}">
+      <span class="material-symbols-outlined" style="font-size:18px;{% if pagina_actual == 'periodos' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.35);{% endif %}">calendar_month</span>
+      <span style="font-size:12.5px;font-weight:500;{% if pagina_actual == 'periodos' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.45);{% endif %}">Periodos</span>
+    </a>
+
+    <div style="font-size:9px;font-weight:700;letter-spacing:0.08em;color:rgba(255,255,255,0.25);padding:12px 8px 4px;text-transform:uppercase;">Automatización</div>
+
+    <a href="/agente" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:1px;text-decoration:none;transition:all 0.15s;
+      {% if pagina_actual == 'agente' %}background:rgba(59,107,245,0.18);{% endif %}">
+      <span class="material-symbols-outlined" style="font-size:18px;{% if pagina_actual == 'agente' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.35);{% endif %}">robot_2</span>
+      <span style="font-size:12.5px;font-weight:500;{% if pagina_actual == 'agente' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.45);{% endif %}">Agente</span>
+    </a>
+
+    <a href="/materias" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:1px;text-decoration:none;transition:all 0.15s;
+      {% if pagina_actual == 'materias' %}background:rgba(59,107,245,0.18);{% endif %}">
+      <span class="material-symbols-outlined" style="font-size:18px;{% if pagina_actual == 'materias' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.35);{% endif %}">auto_stories</span>
+      <span style="font-size:12.5px;font-weight:500;{% if pagina_actual == 'materias' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.45);{% endif %}">Materias</span>
+    </a>
+
+    {% if session.get('es_coordinador') %}
+    <a href="/coordinador" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:1px;text-decoration:none;transition:all 0.15s;
+      {% if pagina_actual == 'coordinador' %}background:rgba(59,107,245,0.18);{% endif %}">
+      <span class="material-symbols-outlined" style="font-size:18px;{% if pagina_actual == 'coordinador' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.35);{% endif %}">supervisor_account</span>
+      <span style="font-size:12.5px;font-weight:500;{% if pagina_actual == 'coordinador' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.45);{% endif %}">Coordinador</span>
+    </a>
+    {% endif %}
+  </nav>
+
+  <!-- Bottom -->
+  <div style="padding:12px 10px;border-top:0.5px solid rgba(255,255,255,0.07);">
+    <!-- Nueva planeación -->
+    <a href="/planear" style="display:flex;align-items:center;justify-content:center;gap:6px;background:linear-gradient(135deg,#3B6BF5,#6C47FF);color:white;border-radius:8px;padding:9px 12px;font-size:12px;font-weight:600;text-decoration:none;margin-bottom:8px;transition:opacity 0.15s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+      <span class="material-symbols-outlined" style="font-size:16px;">add</span>
+      Nueva planeación
+    </a>
+
+    <!-- Perfil -->
+    <a href="/perfil" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;text-decoration:none;margin-bottom:2px;transition:all 0.15s;{% if pagina_actual == 'perfil' %}background:rgba(59,107,245,0.18);{% endif %}" onmouseover="this.style.background='rgba(255,255,255,0.04)'" onmouseout="this.style.background='{% if pagina_actual == 'perfil' %}rgba(59,107,245,0.18){% else %}transparent{% endif %}'">
+      <div style="width:28px;height:28px;background:linear-gradient(135deg,#3B6BF5,#6C47FF);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;flex-shrink:0;">
+        {{ session.get('nombre', 'U')[0].upper() }}
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:500;color:rgba(255,255,255,0.75);">{{ session.get('nombre', 'Usuario') }}</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.3);">Perfil</div>
+      </div>
+    </a>
+
+    <!-- Cerrar sesión -->
+    <a href="/logout" style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;text-decoration:none;transition:all 0.15s;" onmouseover="this.style.background='rgba(186,26,26,0.12)'" onmouseout="this.style.background='transparent'">
+      <span class="material-symbols-outlined" style="font-size:18px;color:rgba(255,100,100,0.5);">logout</span>
+      <span style="font-size:12px;font-weight:500;color:rgba(255,100,100,0.5);">Cerrar sesión</span>
+    </a>
+  </div>
+</aside>
+
+<!-- NAV MÓVIL INFERIOR -->
+<nav style="display:none;" class="mobile-nav-bar">
+  <style>
+    @media(max-width:768px){
+      .mobile-nav-bar{display:flex !important;position:fixed;bottom:0;left:0;right:0;background:rgba(10,15,30,0.95);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-top:0.5px solid rgba(255,255,255,0.08);padding:8px 8px 12px;justify-content:space-around;align-items:center;z-index:50;}
+    }
+  </style>
+  <a href="/dashboard" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 12px;text-decoration:none;">
+    <span class="material-symbols-outlined" style="font-size:22px;{% if pagina_actual == 'dashboard' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.35);{% endif %}">dashboard</span>
+    <span style="font-size:10px;{% if pagina_actual == 'dashboard' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.3);{% endif %}">Inicio</span>
+  </a>
+  <a href="/planear" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 12px;text-decoration:none;">
+    <span class="material-symbols-outlined" style="font-size:22px;{% if pagina_actual == 'planear' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.35);{% endif %}">event_note</span>
+    <span style="font-size:10px;{% if pagina_actual == 'planear' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.3);{% endif %}">Planear</span>
+  </a>
+  <a href="/planear" style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#3B6BF5,#6C47FF);display:flex;align-items:center;justify-content:center;margin-bottom:4px;text-decoration:none;">
+    <span class="material-symbols-outlined" style="font-size:20px;color:white;">add</span>
+  </a>
+  <a href="/asistente" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 12px;text-decoration:none;">
+    <span class="material-symbols-outlined" style="font-size:22px;{% if pagina_actual == 'asistente' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.35);{% endif %}">smart_toy</span>
+    <span style="font-size:10px;{% if pagina_actual == 'asistente' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.3);{% endif %}">IA</span>
+  </a>
+  <a href="/perfil" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 12px;text-decoration:none;">
+    <span class="material-symbols-outlined" style="font-size:22px;{% if pagina_actual == 'perfil' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.35);{% endif %}">person</span>
+    <span style="font-size:10px;{% if pagina_actual == 'perfil' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.3);{% endif %}">Perfil</span>
+  </a>
+</nav>

@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+{% block title %}Periodos{% endblock %}
+
+{% block body %}
+<div class="flex min-h-screen bg-surface">
+  {% include "layout.html" %}
+
+  <main class="flex-1 flex flex-col">
+    <!-- Top Bar -->
+    <header class="sticky top-0 z-40 bg-surface/80 backdrop-blur-md flex justify-between items-center h-16 px-lg w-full border-b border-outline-variant/20">
+      <div class="flex items-center gap-md">
+        <span class="material-symbols-outlined text-primary">calendar_month</span>
+        <h2 class="text-lg font-medium text-on-surface">Periodos del año</h2>
+      </div>
+      <div class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center text-primary font-bold text-sm">
+        {{ session.get('usuario', 'U')[0].upper() }}
+      </div>
+    </header>
+
+    <div class="p-lg md:p-xl max-w-4xl mx-auto w-full pb-20 md:pb-xl space-y-xl">
+
+      <!-- Selector de materia -->
+      <div class="bg-surface-container-lowest rounded-[24px] border border-outline-variant/30 p-lg flex items-center gap-md">
+        <span class="material-symbols-outlined text-primary">auto_stories</span>
+        <div class="flex-1">
+          <label class="text-xs font-medium text-on-surface-variant">Materia</label>
+          <select id="sel-materia" onchange="cargarPeriodos()"
+            class="w-full bg-transparent border-none text-sm font-medium text-on-surface focus:ring-0 mt-xs">
+            <option value="">— Selecciona una materia —</option>
+            {% for mid, mat in materias.items() %}
+            <option value="{{ mat.nombre }}">{{ mat.nombre }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <!-- Tabs de periodos -->
+      <div class="flex gap-sm">
+        {% for num in [1,2,3] %}
+        <button onclick="mostrarPeriodo({{ num }})"
+          id="tab-{{ num }}"
+          class="flex-1 py-sm rounded-full text-sm font-medium transition-all
+          {% if loop.first %}bg-primary text-on-primary shadow-md{% else %}bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest{% endif %}">
+          Periodo {{ num }}
+        </button>
+        {% endfor %}
+      </div>
+
+      <!-- Formularios de periodos -->
+      {% for num in [1,2,3] %}
+      <div id="periodo-{{ num }}" class="space-y-lg {% if not loop.first %}hidden{% endif %}">
+
+        <!-- Info básica -->
+        <div class="bg-surface-container-lowest rounded-[32px] border border-outline-variant/30 p-xl shadow-sm">
+          <div class="flex items-center gap-md mb-xl">
+            <div class="p-sm bg-primary-container/10 rounded-xl text-primary">
+              <span class="material-symbols-outlined">event_note</span>
+            </div>
+            <h3 class="text-lg font-medium text-on-surface">Configuración del periodo {{ num }}</h3>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-lg">
+            <div class="space-y-xs">
+              <label class="text-sm font-medium text-on-surface-variant">Número de semanas</label>
+              <input type="number" id="sem-{{ num }}" value="10" min="4" max="16"
+                class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary"/>
+            </div>
+            <div class="space-y-xs">
+              <label class="text-sm font-medium text-on-surface-variant">Tema central del periodo</label>
+              <input type="text" id="tema-{{ num }}" placeholder="Ej: Ensamble con percusión"
+                class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary"/>
+            </div>
+          </div>
+        </div>
+
+        <!-- Proyecto ABP -->
+        <div class="bg-surface-container-lowest rounded-[32px] border border-outline-variant/30 p-xl shadow-sm">
+          <div class="flex items-center gap-md mb-xs">
+            <div class="p-sm bg-tertiary-fixed rounded-xl text-tertiary">
+              <span class="material-symbols-outlined">emoji_events</span>
+            </div>
+            <div>
+              <h3 class="text-lg font-medium text-on-surface">Proyecto central del periodo</h3>
+              <p class="text-xs text-on-surface-variant">Aprendizaje Basado en Proyectos — cada clase avanza hacia este objetivo</p>
+            </div>
+          </div>
+
+          <div class="mt-lg space-y-lg">
+            <div class="space-y-xs">
+              <label class="text-sm font-medium text-on-surface-variant">Nombre del proyecto</label>
+              <input type="text" id="proyecto-{{ num }}"
+                placeholder="Ej: Tocar la canción del trimestre con todos los instrumentos"
+                class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary"/>
+            </div>
+            <div class="space-y-xs">
+              <label class="text-sm font-medium text-on-surface-variant">Descripción del proyecto</label>
+              <textarea id="proyecto-desc-{{ num }}" rows="3"
+                placeholder="Ej: Los estudiantes aprenderán la canción por secciones, luego harán ensamble completo y al final del periodo la presentarán ante el colegio con la mayoría de instrumentos disponibles."
+                class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary resize-none"></textarea>
+            </div>
+            <div class="space-y-xs">
+              <label class="text-sm font-medium text-on-surface-variant">Fecha de presentación</label>
+              <input type="text" id="proyecto-fecha-{{ num }}"
+                placeholder="Ej: Última semana del periodo / Izadas de bandera / Semana cultural"
+                class="w-full rounded-xl border border-outline-variant py-md px-md text-sm bg-surface focus:ring-2 focus:ring-primary focus:border-primary"/>
+            </div>
+          </div>
+
+          <!-- Ejemplo visual -->
+          <div class="mt-lg p-md bg-tertiary-fixed/30 rounded-xl border border-tertiary-fixed">
+            <p class="text-xs font-medium text-tertiary mb-xs flex items-center gap-xs">
+              <span class="material-symbols-outlined text-[14px]">lightbulb</span>
+              Cómo la IA usará esto
+            </p>
+            <p class="text-xs text-on-surface-variant">Cada planeación generada tendrá actividades que acercan al estudiante al proyecto. Por ejemplo: Semana 1 → aprender melodía, Semana 4 → ensayo por secciones, Semana 8 → ensamble completo, Semana 10 → ensayo de presentación.</p>
+          </div>
+        </div>
+
+        <!-- Bloques -->
+        <div class="bg-surface-container-lowest rounded-[32px] border border-outline-variant/30 p-xl shadow-sm">
+          <div class="flex items-center gap-md mb-xl">
+            <div class="p-sm bg-secondary-container rounded-xl">
+              <span class="material-symbols-outlined text-on-secondary-container">view_week</span>
+            </div>
+            <div>
+              <h3 class="text-lg font-medium text-on-surface">Bloques de contenido</h3>
+              <p class="text-xs text-on-surface-variant">Divide el periodo en etapas del proyecto</p>
+            </div>
+          </div>
+          <div id="bloques-{{ num }}" class="space-y-md"></div>
+          <button onclick="generarBloques({{ num }})"
+            class="mt-lg w-full border border-dashed border-outline-variant text-on-surface-variant py-sm rounded-xl text-sm hover:border-primary hover:text-primary transition-colors flex items-center justify-center gap-xs">
+            <span class="material-symbols-outlined text-[16px]">refresh</span>
+            Generar bloques automáticamente
+          </button>
+        </div>
+
+        <!-- Botón guardar -->
+        <button onclick="guardarPeriodo({{ num }})"
+          class="w-full bg-primary text-on-primary py-md rounded-full text-sm font-medium hover:opacity-90 transition-all flex items-center justify-center gap-sm shadow-lg active:scale-95">
+          <span class="material-symbols-outlined text-[16px]">save</span>
+          Guardar periodo {{ num }}
+        </button>
+
+        <!-- Confirmación -->
+        <div id="ok-{{ num }}" class="hidden bg-tertiary-fixed text-on-tertiary-fixed px-md py-sm rounded-xl text-sm flex items-center gap-sm">
+          <span class="material-symbols-outlined text-[16px]">check_circle</span>
+          Periodo {{ num }} guardado correctamente
+        </div>
+
+      </div>
+      {% endfor %}
+
+    </div>
+  </main>
+</div>
+
+<script>
+let matActual = '';
+let periodosGuardados = {};
+
+function mostrarPeriodo(num) {
+  [1,2,3].forEach(n => {
+    document.getElementById(`periodo-${n}`).classList.add('hidden');
+    const tab = document.getElementById(`tab-${n}`);
+    tab.className = 'flex-1 py-sm rounded-full text-sm font-medium transition-all bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest';
+  });
+  document.getElementById(`periodo-${num}`).classList.remove('hidden');
+  const tabActivo = document.getElementById(`tab-${num}`);
+  tabActivo.className = 'flex-1 py-sm rounded-full text-sm font-medium transition-all bg-primary text-on-primary shadow-md';
+}
+
+function generarBloques(num) {
+  const semanas = parseInt(document.getElementById(`sem-${num}`).value) || 10;
+  const proyecto = document.getElementById(`proyecto-${num}`).value;
+  const cont = document.getElementById(`bloques-${num}`);
+  const numBloques = Math.ceil(semanas / 2);
+  cont.innerHTML = '';
+  for (let b = 0; b < numBloques; b++) {
+    const s1 = b*2+1, s2 = Math.min(b*2+2, semanas);
+    const label = s1 === s2 ? `Semana ${s1}` : `Semanas ${s1}-${s2}`;
+    const placeholder = proyecto ? `Etapa ${b+1} hacia: ${proyecto.substring(0,40)}...` : `Ej: Introducción al tema`;
+    cont.innerHTML += `
+      <div class="flex items-center gap-md p-md bg-surface-container-low rounded-xl border border-outline-variant/20">
+        <span class="text-xs font-medium text-on-surface-variant w-24 flex-shrink-0 font-mono">${label}</span>
+        <input type="text" id="bloque-${num}-${b}" placeholder="${placeholder}"
+          class="flex-1 bg-transparent border-none text-sm text-on-surface focus:ring-0 placeholder:text-outline/50"/>
+      </div>`;
+  }
+}
+
+async function cargarPeriodos() {
+  matActual = document.getElementById('sel-materia').value;
+  if (!matActual) return;
+
+  const res = await fetch(`/api/periodos/obtener?materia=${encodeURIComponent(matActual)}`);
+  const data = await res.json();
+  if (!data.ok) return;
+
+  periodosGuardados = data.periodos || {};
+
+  [1,2,3].forEach(n => {
+    const p = periodosGuardados[String(n)];
+    if (p) {
+      document.getElementById(`sem-${n}`).value = p.semanas || 10;
+      document.getElementById(`tema-${n}`).value = p.tema_central || '';
+      document.getElementById(`proyecto-${n}`).value = p.proyecto || '';
+      document.getElementById(`proyecto-desc-${n}`).value = p.proyecto_desc || '';
+      document.getElementById(`proyecto-fecha-${n}`).value = p.proyecto_fecha || '';
+
+      // Generar bloques
+      generarBloques(n);
+      const bloques = p.bloques || {};
+      Object.entries(bloques).forEach(([b, val]) => {
+        const inp = document.getElementById(`bloque-${n}-${b}`);
+        if (inp) inp.value = val;
+      });
+    } else {
+      generarBloques(n);
+    }
+  });
+}
+
+async function guardarPeriodo(num) {
+  if (!matActual) { alert('Selecciona una materia primero'); return; }
+
+  const semanas = parseInt(document.getElementById(`sem-${num}`).value) || 10;
+  const tema = document.getElementById(`tema-${num}`).value;
+  const proyecto = document.getElementById(`proyecto-${num}`).value;
+  const proyecto_desc = document.getElementById(`proyecto-desc-${num}`).value;
+  const proyecto_fecha = document.getElementById(`proyecto-fecha-${num}`).value;
+
+  const numBloques = Math.ceil(semanas / 2);
+  const bloques = {};
+  for (let b = 0; b < numBloques; b++) {
+    const inp = document.getElementById(`bloque-${num}-${b}`);
+    if (inp) bloques[String(b)] = inp.value;
+  }
+
+  const res = await fetch('/api/periodos/guardar', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      materia: matActual, periodo: num, semanas,
+      tema_central: tema, bloques,
+      proyecto, proyecto_desc, proyecto_fecha
+    })
+  });
+  const data = await res.json();
+  if (data.ok) {
+    const ok = document.getElementById(`ok-${num}`);
+    ok.classList.remove('hidden');
+    setTimeout(() => ok.classList.add('hidden'), 3000);
+  }
+}
+
+// Inicializar bloques al cargar
+[1,2,3].forEach(n => generarBloques(n));
+</script>
+{% endblock %}
