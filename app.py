@@ -907,37 +907,74 @@ def generar_grupo():
     except Exception:
         pass
 
+    # Materiales reales de la materia
+    try:
+        mem_mat = cargar_memoria(nombre, mat_nombre)
+        recursos_mat = mem_mat.get("recursos", "")
+    except Exception:
+        recursos_mat = ""
+    recursos_txt = f"\n\nMATERIALES DISPONIBLES (usa SOLO estos):\n{recursos_mat}" if recursos_mat else ""
+
+    # Historial de clases anteriores por curso
+    cursos_grupo = data.get("cursos", [])
+    historial_txt = ""
+    try:
+        mem_h = cargar_memoria(nombre, mat_nombre)
+        hist = mem_h.get("historial_cursos", {})
+        lineas = []
+        for curso in cursos_grupo:
+            entradas = hist.get(curso, [])
+            if entradas:
+                ultimas = entradas[-3:]
+                temas = " → ".join(e["titulo"] for e in ultimas)
+                lineas.append(f"  {curso}: {temas}")
+        if lineas:
+            historial_txt = "\n\nCLASES ANTERIORES DE ESTOS CURSOS (NO repetir, continuar desde aqui):\n" + "\n".join(lineas)
+    except Exception:
+        pass
+
+    # Observaciones del profesor
+    obs_txt = ""
+    try:
+        mem_obs = cargar_memoria(nombre, mat_nombre)
+        obs_list = mem_obs.get("observaciones", [])
+        if obs_list:
+            recientes = [o["observacion"] for o in obs_list[-4:]]
+            obs_txt = "\n\nINDICACIONES DEL PROFESOR (respeta siempre):\n" + "\n".join(f"  - {o}" for o in recientes)
+    except Exception:
+        pass
+
     sistema_acts = (
-        "Eres asistente de planeacion para un profesor de colegio. "
-        "Las actividades deben ser REALES, PROGRESIVAS y POSIBLES en una clase normal. "
-        "NUNCA menciones nombres de canciones o artistas — escribe: la cancion del periodo, canciones trabajadas, etc. "
-        "NUNCA uses formato de lista con numeros. "
-        "NUNCA agregues texto antes ni despues del bloque."
+        f"Eres asistente de planeacion para un profesor de {mat_nombre} de colegio colombiano. "
+        f"Conoces profundamente esta materia y propones actividades REALES y ESPECIFICAS de {mat_nombre}. "
+        "Las actividades deben ser concretas, breves y ejecutables en una clase normal de 45-60 min. "
+        "NUNCA menciones nombres de canciones, artistas ni obras especificas — escribe: la cancion del periodo, la obra trabajada, etc. "
+        "NUNCA uses listas numeradas. NUNCA agregues texto antes ni despues del bloque solicitado. "
+        "Cada actividad: verbo infinitivo + objeto concreto, maximo 6 palabras. "
+        "REGLA CLAVE DE PROGRESION: cada clase debe avanzar un paso mas en complejidad respecto a la anterior — nunca retroceder ni repetir nivel. "
+        "REGLA CLAVE DE DIFERENCIACION: si hay historial de cursos diferentes, el texto de las actividades DEBE ser distinto para cada curso aunque el tema sea similar — adapta el vocabulario, el nivel y los ejercicios al curso especifico. "
+        "Al inicio del bloque de cada semana, incluye una frase corta que conecte con lo visto antes, por ejemplo: 'Continuando con el proceso iniciado...' o 'Avanzando desde lo trabajado la clase anterior...'. "
     )
 
-    prompt_acts = f"""Profesor de {mat_nombre}.{est_txt}
+    prompt_acts = f"""Soy profesor de {mat_nombre}.{est_txt}{recursos_txt}{historial_txt}{obs_txt}
 
-TEMA: {ideas}{ctx_p_txt}{estructura_txt}
+TEMA DE LA CLASE: {ideas}{ctx_p_txt}{estructura_txt}
 
-Formato EXACTO:
+Escribe EXACTAMENTE este bloque, sin agregar nada antes ni despues:
 
 Semana {s1} En esta semana vamos a:
-* [actividad]
-* [actividad]
-* [actividad]
-* [actividad]
-* [actividad]
-* [actividad]
+* [actividad especifica de {mat_nombre}]
+* [actividad especifica de {mat_nombre}]
+* [actividad especifica de {mat_nombre}]
+* [actividad especifica de {mat_nombre}]
 
 Semana {s2} En esta semana vamos a:
-* [actividad]
-* [actividad]
-* [actividad]
-* [actividad]
-* [actividad]
-* [actividad]
+* [actividad especifica de {mat_nombre}]
+* [actividad especifica de {mat_nombre}]
+* [actividad especifica de {mat_nombre}]
+* [actividad especifica de {mat_nombre}]
 
-Reglas: verbo infinitivo, max 8 palabras por actividad, semana {s1} introduce, semana {s2} profundiza, progresivo y real, sin nombres de canciones.{hist_a}"""
+Reglas estrictas: verbo infinitivo, max 6 palabras por actividad, semana {s1} introduce el tema, semana {s2} profundiza o aplica, actividades progresivas y reales de {mat_nombre}, sin nombres propios de canciones ni artistas.{hist_a}"""
 
     try:
         if proveedor == "anthropic":
@@ -976,6 +1013,27 @@ Reglas: verbo infinitivo, max 8 palabras por actividad, semana {s1} introduce, s
 
         if "Semana" in acts:
             acts = acts[acts.find("Semana"):]
+
+        # Guardar historial por curso
+        try:
+            cursos_grupo = data.get("cursos", [])
+            if cursos_grupo:
+                mem_h = cargar_memoria(nombre, mat_nombre)
+                if "historial_cursos" not in mem_h:
+                    mem_h["historial_cursos"] = {}
+                for curso in cursos_grupo:
+                    if curso not in mem_h["historial_cursos"]:
+                        mem_h["historial_cursos"][curso] = []
+                    mem_h["historial_cursos"][curso].append({
+                        "periodo": str(data.get("periodo", "")),
+                        "bloque": str(data.get("bloque", "")),
+                        "semanas": f"{s1}-{s2}",
+                        "titulo": titulo,
+                    })
+                    mem_h["historial_cursos"][curso] = mem_h["historial_cursos"][curso][-8:]
+                guardar_memoria(nombre, mat_nombre, mem_h)
+        except Exception:
+            pass
 
         return jsonify({"ok": True, "titulo": titulo, "actividades": acts})
 

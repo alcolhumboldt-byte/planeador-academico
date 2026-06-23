@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Planeador Académico{% endblock %} — Humboldt</title>
   <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet"/>
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
   <script>
   tailwind.config = {
@@ -65,7 +65,7 @@
           "margin-mobile":"16px","margin-desktop":"32px"
         },
         fontFamily: {
-          "sans":       ["DM Sans","sans-serif"],
+          "sans":       ["Manrope","DM Sans","sans-serif"],
           "mono":       ["JetBrains Mono","monospace"],
           "label-mono": ["JetBrains Mono"],
         },
@@ -84,24 +84,25 @@
   }
   </script>
   <style>
-    body { font-family: 'DM Sans', sans-serif; background-color: #fcf9f5; }
+    body { font-family: 'Manrope', 'DM Sans', sans-serif; background-color: #fcf9f5; }
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     /* Compatibilidad con clases legacy del CSS anterior */
     .card { @apply bg-surface-container-lowest rounded-xl border border-outline-variant/20 p-6; }
     .card-sm { @apply bg-surface-container-lowest rounded-xl border border-outline-variant/20 p-4; }
     .btn { @apply inline-flex items-center gap-2 px-4 py-2.5 rounded-lg font-button-text text-button-text border border-outline-variant/40 bg-surface text-on-surface transition-all active:scale-95; }
-    .btn-primary { @apply bg-primary text-on-primary border-primary shadow-sm hover:shadow-md; }
+    .btn-primary { @apply text-on-primary border-transparent shadow-sm hover:shadow-md; background-image: linear-gradient(135deg,#3B6BF5,#6C47FF); }
     .btn-success { @apply bg-tertiary text-on-tertiary border-tertiary; }
     .btn-danger { @apply bg-error text-on-error border-error; }
     .btn-sm { @apply px-3 py-1.5 text-sm rounded-lg; }
     .btn-block { @apply w-full justify-center; }
     .badge { @apply inline-flex items-center px-2 py-0.5 rounded-full font-label-mono text-label-mono; }
-    .badge-blue { @apply bg-primary-fixed text-on-primary-fixed; }
-    .badge-green { @apply bg-tertiary-fixed text-on-tertiary-fixed; }
-    .badge-amber { @apply bg-yellow-100 text-yellow-800; }
+    .badge { font-weight: 600; }
+    .badge-blue { background:rgba(59,107,245,0.12); color:#2452D6; }
+    .badge-green { background:rgba(22,163,74,0.13); color:#15803D; }
+    .badge-amber { background:rgba(245,158,11,0.16); color:#D97706; }
     .badge-red { @apply bg-error-container text-on-error-container; }
-    .badge-gray { @apply bg-surface-container text-on-surface-variant; }
+    .badge-gray { background:rgba(108,71,255,0.10); color:#6C47FF; }
     .chip { @apply inline-flex items-center px-2.5 py-1 rounded-full text-xs font-mono border border-outline-variant/40 bg-surface text-on-surface; }
     .alert { @apply p-3 rounded-xl text-sm; }
     .alert-error { @apply bg-error-container text-on-error-container; }
@@ -114,7 +115,7 @@
       font-size: 16px;
     }
     .stats-grid { @apply grid gap-3; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); }
-    .stat-card { @apply bg-surface-container rounded-xl p-3; }
+    .stat-card { @apply rounded-xl p-3; background-image: linear-gradient(135deg, rgba(59,107,245,0.07), rgba(108,71,255,0.05)); border: 1px solid rgba(108,71,255,0.10); }
     .stat-num { @apply text-2xl font-bold text-on-surface; }
     .stat-label { @apply text-xs text-on-surface-variant mt-1; }
     .grid-2 { @apply grid grid-cols-1 md:grid-cols-2 gap-4; }
