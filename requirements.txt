@@ -6,3 +6,5 @@ selenium
 webdriver-manager
 cryptography
 gunicorn
+bcrypt
+openai
