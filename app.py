@@ -156,12 +156,42 @@ try:
 except ImportError:
     SELENIUM_OK = False
 
+def _crear_driver_chrome():
+    """Crea un driver de Chrome. Si HEADLESS=true (uso en servidor/contenedor),
+    corre sin ventana usando el Chromium/ChromeDriver del sistema (CHROME_BIN /
+    CHROMEDRIVER_BIN). En Mac local sigue abriendo una ventana visible."""
+    opts = webdriver.ChromeOptions()
+    opts.add_argument("--disable-notifications")
+
+    headless = os.environ.get("HEADLESS", "false").lower() == "true"
+    if headless:
+        opts.add_argument("--headless=new")
+        opts.add_argument("--no-sandbox")
+        opts.add_argument("--disable-dev-shm-usage")
+        opts.add_argument("--disable-gpu")
+        opts.add_argument("--window-size=1920,1080")
+    else:
+        opts.add_argument("--start-maximized")
+
+    chrome_bin = os.environ.get("CHROME_BIN")
+    if chrome_bin:
+        opts.binary_location = chrome_bin
+
+    chromedriver_bin = os.environ.get("CHROMEDRIVER_BIN")
+    if chromedriver_bin:
+        service = Service(executable_path=chromedriver_bin)
+    else:
+        service = Service(ChromeDriverManager().install())
+
+    return webdriver.Chrome(service=service, options=opts)
+
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "cambia-esta-clave-en-produccion")
 
 # ── Seguridad de sesión ───────────────────────
 app.config['SESSION_COOKIE_SAMESITE']    = 'Lax'
-app.config['SESSION_COOKIE_SECURE']      = False   # True en producción con HTTPS
+app.config['SESSION_COOKIE_SECURE']      = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'   # True en producción vía variable de entorno
 app.config['SESSION_COOKIE_HTTPONLY']    = True     # JS no puede leer la cookie
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7
 app.config['SESSION_COOKIE_NAME']        = '__Host-session' if False else 'session'
@@ -215,7 +245,7 @@ else:
             return f
     limiter = _FakeLimiter()
 
-CARPETA_DATOS = os.path.expanduser("~/Desktop/planeador_academico")
+CARPETA_DATOS = os.environ.get("DATA_DIR", os.path.expanduser("~/Desktop/planeador_academico"))
 AÑO_ACTUAL   = str(datetime.now().year)
 
 # ── Constantes de la plataforma ───────────────
@@ -224,7 +254,7 @@ URL_PLANES = "https://www.colhumboldt.controlacademico.com/modules.php?name=Plan
 URL_AULA_V = "https://www.colhumboldt.controlacademico.com/AulaVirtual/preguntaseval/inicio.php"
 PAUSA      = 4
 TIMEOUT    = 45
-RUTA_CONFIG  = os.path.join(os.path.expanduser("~/Desktop/planeador_academico"), "config.json")
+RUTA_CONFIG  = os.path.join(CARPETA_DATOS, "config.json")
 
 def cargar_config():
     if not os.path.exists(RUTA_CONFIG): return {}
@@ -1179,26 +1209,23 @@ def detectar_materias():
     # Usando constantes globales
 
     def hacer_barrido():
-        opts = webdriver.ChromeOptions()
-        opts.add_argument("--start-maximized")
-        opts.add_argument("--disable-notifications")
-        driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager().install()), options=opts)
+        driver = _crear_driver_chrome()
 
         resultado = {"ok": False, "error": "", "materias": [], "cursos_plataforma": []}
 
         try:
             driver.get(URL_LOGIN)
-            # Esperar hasta 90 segundos a que el usuario inicie sesion
-            # Detectamos que inicio sesion cuando ya no estamos en login.php
-            for _ in range(90):
-                time.sleep(1)
-                if "login" not in driver.current_url.lower():
-                    break
-            else:
-                resultado["error"] = "Tiempo de espera agotado. Inicia sesion mas rapido."
-                driver.quit()
-                return resultado
+            time.sleep(2)
+            login_ok = _login_automatico(driver, nombre, lambda *a, **k: None)
+            if not login_ok:
+                for _ in range(90):
+                    time.sleep(1)
+                    if "login" not in driver.current_url.lower():
+                        break
+                else:
+                    resultado["error"] = "Tiempo de espera agotado. Inicia sesion mas rapido."
+                    driver.quit()
+                    return resultado
 
             # Ir a Planes de Area
             driver.get(URL_PLANES)
@@ -1426,25 +1453,24 @@ def enviar_plataforma():
             driver = driver_prev
             log("info", "Reutilizando Chrome abierto — continuando con nueva materia")
         else:
-            opts = webdriver.ChromeOptions()
-            opts.add_argument("--start-maximized")
-            opts.add_argument("--disable-notifications")
-            driver = webdriver.Chrome(
-                service=Service(ChromeDriverManager().install()), options=opts)
+            driver = _crear_driver_chrome()
 
             try:
                 driver.get(URL_LOGIN)
-                log("info", "Chrome abierto — inicia sesión en la plataforma del colegio")
-
-                # Esperar hasta 90s a que inicie sesión
-                for _ in range(90):
-                    time.sleep(1)
-                    if "login" not in driver.current_url.lower():
-                        break
+                time.sleep(2)
+                login_ok = _login_automatico(driver, nombre, log)
+                if login_ok:
+                    log("ok", "Login automático exitoso")
                 else:
-                    log("error", "Tiempo de espera agotado")
-                    driver.quit()
-                    return
+                    log("info", "Chrome abierto — inicia sesión en la plataforma del colegio")
+                    for _ in range(90):
+                        time.sleep(1)
+                        if "login" not in driver.current_url.lower():
+                            break
+                    else:
+                        log("error", "Tiempo de espera agotado")
+                        driver.quit()
+                        return
             except Exception as e:
                 log("error", f"Error abriendo Chrome: {str(e)}")
                 try: driver.quit()
@@ -1848,11 +1874,7 @@ def agente_ejecutar():
             log("info", "Reutilizando Chrome abierto")
         else:
             try:
-                opts = webdriver.ChromeOptions()
-                opts.add_argument("--start-maximized")
-                opts.add_argument("--disable-notifications")
-                driver = webdriver.Chrome(
-                    service=Service(ChromeDriverManager().install()), options=opts)
+                driver = _crear_driver_chrome()
                 time.sleep(2)
                 driver.get(URL_LOGIN)
                 time.sleep(3)
@@ -2209,11 +2231,7 @@ def verificar_planeaciones():
     password_enc = perfiles_data[nombre].get("colegio_password", "")
 
     def correr_verificacion():
-        opts = webdriver.ChromeOptions()
-        opts.add_argument("--start-maximized")
-        opts.add_argument("--disable-notifications")
-        driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager().install()), options=opts)
+        driver = _crear_driver_chrome()
 
         try:
             driver.get(URL_LOGIN)

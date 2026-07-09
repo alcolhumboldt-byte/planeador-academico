@@ -1,0 +1,11 @@
+.env
+.env.example
+.git
+.gitignore
+__pycache__/
+*.pyc
+.venv/
+venv/
+planeador_electron/
+node_modules/
+*.log

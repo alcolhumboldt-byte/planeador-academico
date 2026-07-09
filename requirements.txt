@@ -1,0 +1,9 @@
+flask
+anthropic
+flask-limiter
+python-dotenv
+selenium
+webdriver-manager
+cryptography
+flask-wtf
+gunicorn

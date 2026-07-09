@@ -1,0 +1,20 @@
+# docker-compose.yml — referencia local / lo que Coolify recrea automáticamente
+# Útil para probar en tu Mac antes de subir a Coolify:
+#   docker compose up --build
+services:
+  planeador:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/data
+    volumes:
+      - planeador_data:/data
+    restart: unless-stopped
+    # Chrome headless necesita más /dev/shm del que Docker da por defecto (64MB)
+    shm_size: "1gb"
+
+volumes:
+  planeador_data:
