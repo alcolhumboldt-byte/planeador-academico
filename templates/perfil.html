@@ -70,7 +70,7 @@
               </div>
               <h3 class="text-lg font-medium text-on-surface">Cambiar contraseña</h3>
             </div>
-            <form method="POST" action="/api/perfil/cambiar_password" class="space-y-lg">
+            <form id="form-password" action="/api/perfil/cambiar_password" class="space-y-lg">
               <div class="space-y-xs">
                 <label class="text-sm font-medium text-on-surface-variant">Contraseña actual</label>
                 <input name="actual" type="password" required
@@ -86,6 +86,7 @@
                 <span class="material-symbols-outlined text-[16px]">save</span>
                 Actualizar contraseña
               </button>
+              <p id="msg-password" class="text-sm hidden"></p>
             </form>
           </div>
 
@@ -100,7 +101,7 @@
                 <p class="text-xs text-on-surface-variant">Para publicar planeaciones automáticamente en controlacademico.com</p>
               </div>
             </div>
-            <form method="POST" action="/api/perfil/credenciales" class="space-y-lg">
+            <form id="form-credenciales" action="/api/perfil/guardar_credenciales_colegio" class="space-y-lg">
               <div class="space-y-xs">
                 <label class="text-sm font-medium text-on-surface-variant">Usuario de controlacademico.com</label>
                 <input name="colegio_usuario" type="text" placeholder="Tu usuario en la plataforma"
@@ -127,6 +128,7 @@
                 <span class="material-symbols-outlined text-[16px]">save</span>
                 Guardar credenciales
               </button>
+              <p id="msg-credenciales" class="text-sm hidden"></p>
             </form>
           </div>
         </section>
@@ -150,7 +152,7 @@
               </div>
               <h3 class="text-base font-medium text-on-surface">API Key de IA</h3>
             </div>
-            <form method="POST" action="/api/perfil/api_key" class="space-y-md">
+            <form id="form-apikey" action="/api/perfil/cambiar_api_key" class="space-y-md">
               <div class="relative">
                 <input name="api_key" type="password" id="api-key-input"
                   placeholder="sk-ant-..."
@@ -165,6 +167,7 @@
                 class="w-full bg-tertiary text-on-tertiary py-sm rounded-xl text-sm font-medium hover:opacity-90 transition-all">
                 Guardar API Key
               </button>
+              <p id="msg-apikey" class="text-sm hidden"></p>
             </form>
           </div>
 
@@ -201,5 +204,48 @@ function togglePass(inputId, iconId) {
     icon.innerText = 'visibility';
   }
 }
+
+function mostrarMsg(id, ok, texto) {
+  const el = document.getElementById(id);
+  el.classList.remove('hidden');
+  el.textContent = texto;
+  el.className = 'text-sm mt-sm ' + (ok ? 'text-tertiary' : 'text-error');
+}
+
+async function enviarJSON(form, url, msgId, onOk) {
+  const datos = {};
+  new FormData(form).forEach((v, k) => datos[k] = v);
+  try {
+    const res  = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(datos)
+    });
+    const data = await res.json();
+    if (data.ok) {
+      mostrarMsg(msgId, true, 'Guardado correctamente.');
+      if (onOk) onOk();
+    } else {
+      mostrarMsg(msgId, false, data.error || 'No se pudo guardar.');
+    }
+  } catch (e) {
+    mostrarMsg(msgId, false, 'Error de conexión.');
+  }
+}
+
+document.getElementById('form-password').addEventListener('submit', function(e) {
+  e.preventDefault();
+  enviarJSON(this, '/api/perfil/cambiar_password', 'msg-password', () => this.reset());
+});
+
+document.getElementById('form-credenciales').addEventListener('submit', function(e) {
+  e.preventDefault();
+  enviarJSON(this, '/api/perfil/guardar_credenciales_colegio', 'msg-credenciales');
+});
+
+document.getElementById('form-apikey').addEventListener('submit', function(e) {
+  e.preventDefault();
+  enviarJSON(this, '/api/perfil/cambiar_api_key', 'msg-apikey');
+});
 </script>
 {% endblock %}
