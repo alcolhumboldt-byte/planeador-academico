@@ -201,7 +201,7 @@
                 <div style="font-size:15px; font-weight:700; color:#15803D;">Periodo {{ p }}</div>
                 <span class="msym per-check" style="font-size:19px; color:{% if p == 2 %}#16A34A{% else %}rgba(22,163,74,0.35){% endif %};">{% if p == 2 %}check_circle{% else %}radio_button_unchecked{% endif %}</span>
               </div>
-              <div style="margin-top:4px; font-size:12px; color:#8A90A6;">10 semanas</div>
+              <div id="semanas-label-{{ p }}" style="margin-top:4px; font-size:12px; color:#8A90A6;">10 semanas</div>
             </div>
             {% endfor %}
           </div>
@@ -216,11 +216,6 @@
           <div style="padding-left:30px; margin-bottom:28px;">
             <select id="sel-bloque" style="border:1.5px solid rgba(59,107,245,0.3); background:#fff; border-radius:12px; padding:10px 14px; font-family:inherit; font-size:14px; font-weight:600; color:#2452D6; cursor:pointer; min-width:220px; outline:none;">
               <option value="0">Bloque 0 — Semanas 1-2</option>
-              <option value="1">Bloque 1 — Semanas 3-4</option>
-              <option value="2">Bloque 2 — Semanas 5-6</option>
-              <option value="3">Bloque 3 — Semanas 7-8</option>
-              <option value="4">Bloque 4 — Semanas 9-10</option>
-              <option value="5">Bloque 5 — Semanas 11-12</option>
             </select>
           </div>
 
@@ -413,11 +408,66 @@ if (resumenChat) {
   sessionStorage.removeItem('materia_chat');
 }
 
+let periodosData = {};
+
+// Genera los bloques de 2 semanas (el ultimo puede quedar de 1 sola semana
+// si el periodo tiene un numero impar de semanas, ej: 13 semanas -> 7 bloques,
+// el ultimo es solo "Semana 13").
+function bloquesDePeriodo(semanas) {
+  const total = parseInt(semanas) || 10;
+  const bloques = [];
+  for (let i = 0; i * 2 < total; i++) {
+    const s1 = i * 2 + 1;
+    const s2 = Math.min(i * 2 + 2, total);
+    bloques.push({
+      s1, s2,
+      label: s1 === s2 ? `Semana ${s1}` : `Semanas ${s1}-${s2}`
+    });
+  }
+  return bloques;
+}
+
+async function cargarPeriodos() {
+  if (!matNombre) return;
+  try {
+    const res  = await fetch(`/api/periodos/obtener?materia=${encodeURIComponent(matNombre)}`);
+    const data = await res.json();
+    if (data.ok) {
+      periodosData = data.periodos || {};
+      actualizarLabelsPeriodo();
+      actualizarOpcionesBloque(periodoSeleccionado);
+    }
+  } catch (e) { /* silencioso — se queda con el valor por defecto */ }
+}
+
+function actualizarLabelsPeriodo() {
+  [1, 2, 3, 4].forEach(p => {
+    const el = document.getElementById(`semanas-label-${p}`);
+    if (!el) return;
+    const semanas = periodosData[String(p)]?.semanas || 10;
+    el.textContent = `${semanas} semanas`;
+  });
+}
+
+function actualizarOpcionesBloque(periodo) {
+  const semanas = periodosData[String(periodo)]?.semanas || 10;
+  const bloques = bloquesDePeriodo(semanas);
+  const sel = document.getElementById('sel-bloque');
+  sel.innerHTML = '';
+  bloques.forEach((b, i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = `Bloque ${i} — ${b.label}`;
+    sel.appendChild(opt);
+  });
+}
+
 // ---- Selección visual de materia ----
 function seleccionarMateria(key, card) {
   matKey = key;
   matNombre = card.dataset.nombre;
   cursos = MATERIAS_DATA[key]?.cursos || [];
+  cargarPeriodos();
   document.querySelectorAll('.mat-card').forEach(c => {
     c.style.borderColor = 'rgba(59,107,245,0.2)';
     c.style.background = 'rgba(59,107,245,0.04)';
@@ -441,6 +491,7 @@ function seleccionarPeriodo(p, card) {
   card.classList.add('selected');
   card.querySelector('.per-check').textContent = 'check_circle';
   card.querySelector('.per-check').style.color = '#16A34A';
+  actualizarOpcionesBloque(p);
 }
 
 // ---- Stepper visual ----
@@ -615,12 +666,14 @@ async function irAPaso3() {
   const bloque  = parseInt(document.getElementById('sel-bloque').value);
   const periodo = periodoSeleccionado;
 
-  const nombresBloque = ['Sem 1-2','Sem 3-4','Sem 5-6','Sem 7-8','Sem 9-10','Sem 11-12'];
+  const semanasPeriodo = periodosData[String(periodo)]?.semanas || 10;
+  const listaBloques   = bloquesDePeriodo(semanasPeriodo);
+  const bloqueInfo     = listaBloques[bloque] || { s1: 1 + bloque * 2, s2: 2 + bloque * 2, label: '' };
   document.getElementById('resumen-fecha-paso3').textContent =
-    `Periodo ${periodo} · Bloque ${bloque} (${nombresBloque[bloque] || ''}) · ${matNombre}`;
+    `Periodo ${periodo} · Bloque ${bloque} (${bloqueInfo.label}) · ${matNombre}`;
 
-  const s1 = String(1 + bloque * 2);
-  const s2 = String(2 + bloque * 2);
+  const s1 = String(bloqueInfo.s1);
+  const s2 = String(bloqueInfo.s2);
 
   document.getElementById('paso-1').classList.add('hidden');
   document.getElementById('paso-2').classList.add('hidden');
@@ -640,11 +693,11 @@ async function irAPaso3() {
     const per    = memData.periodos[String(periodo)];
     const bloques = per.bloques || {};
     const lines  = [`PROGRESION PERIODO ${periodo}: ${per.tema_central || ''}`];
+    const listaBloquesCtx = bloquesDePeriodo(per.semanas || semanasPeriodo);
     Object.entries(bloques).forEach(([b, desc]) => {
-      const ss1  = String(parseInt(b)*2+1);
-      const ss2  = String(parseInt(b)*2+2);
+      const infoB = listaBloquesCtx[parseInt(b)] || { s1: parseInt(b)*2+1, s2: parseInt(b)*2+2 };
       const marca = b === String(bloque) ? ' ← ESTAMOS AQUI' : '';
-      lines.push(`Semanas ${ss1}-${ss2}: ${desc || 'continuacion'}${marca}`);
+      lines.push(`Semanas ${infoB.s1}-${infoB.s2}: ${desc || 'continuacion'}${marca}`);
     });
     ctxPeriodo = lines.join('\n');
   }
