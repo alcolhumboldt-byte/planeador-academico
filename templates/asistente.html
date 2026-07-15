@@ -21,6 +21,14 @@
         </div>
       </div>
       <div class="flex items-center gap-md">
+        {% if materias and materias|length > 1 %}
+        <select id="sel-materia-chat" onchange="cambiarMateria(this.value)"
+          class="text-sm rounded-full border border-outline-variant py-xs px-md bg-surface">
+          {% for k, m in materias.items() %}
+          <option value="{{ m.nombre }}" {% if m.nombre == materia_inicial %}selected{% endif %}>{{ m.nombre }}</option>
+          {% endfor %}
+        </select>
+        {% endif %}
         <button onclick="limpiarChat()" class="text-on-surface-variant hover:text-primary transition-colors p-sm rounded-full hover:bg-surface-container-highest" title="Limpiar chat">
           <span class="material-symbols-outlined">delete_sweep</span>
         </button>
@@ -29,6 +37,11 @@
         </div>
       </div>
     </header>
+
+    <div id="banner-onboarding" class="hidden bg-primary-fixed text-on-primary-fixed text-sm px-lg py-md flex items-center gap-sm">
+      <span class="material-symbols-outlined text-[18px]">waving_hand</span>
+      <span>Antes de planear, cuéntale al asistente qué hace única tu clase — así las planeaciones dejan de ser genéricas.</span>
+    </div>
 
     <!-- Chat Area -->
     <section class="flex-1 overflow-y-auto p-lg flex flex-col gap-xl pb-2xl" id="chat-container">
@@ -149,10 +162,17 @@
 
 <script src="/static/js/voz.js"></script>
 <script>
-const chatContainer = document.getElementById('chat-container');
-const mensajesDiv = document.getElementById('mensajes');
-const onboarding = document.getElementById('onboarding');
+const chatContainer   = document.getElementById('chat-container');
+const mensajesDiv     = document.getElementById('mensajes');
+const onboarding      = document.getElementById('onboarding');
 const typingIndicator = document.getElementById('typing-indicator');
+const bannerOnboarding = document.getElementById('banner-onboarding');
+
+let matNombre   = {{ (materia_inicial or (materias.values()|list|first).nombre if materias else '') | tojson }};
+const onboardingForzado = {{ 'true' if onboarding_forzado else 'false' }};
+let modoActual  = 'chat';
+let historialChat = [];
+let onboardingCompletadoAhora = false;
 
 function scrollBottom() {
   chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -188,12 +208,48 @@ function agregarMensaje(rol, contenido) {
   scrollBottom();
 }
 
+function agregarBotonVolver() {
+  const div = document.createElement('div');
+  div.className = 'flex justify-center mt-md';
+  div.innerHTML = `<a href="/planear?materia=${encodeURIComponent(matNombre)}"
+      class="bg-primary text-on-primary px-xl py-md rounded-full text-sm font-medium hover:opacity-90 transition-all inline-flex items-center gap-xs">
+      <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+      Volver a Planear
+    </a>`;
+  mensajesDiv.appendChild(div);
+  scrollBottom();
+}
+
+async function iniciarConversacion() {
+  if (!matNombre) return;
+  typingIndicator.classList.remove('hidden');
+  try {
+    const res  = await fetch('/api/chat/inicio', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({materia: matNombre})
+    });
+    const data = await res.json();
+    typingIndicator.classList.add('hidden');
+    if (!data.ok) return;
+    modoActual = data.es_primera_vez ? 'onboarding' : 'chat';
+    if (data.es_primera_vez || onboardingForzado) {
+      bannerOnboarding.classList.remove('hidden');
+    }
+    agregarMensaje('ia', data.respuesta);
+    historialChat.push({role: 'assistant', content: data.respuesta});
+  } catch (e) {
+    typingIndicator.classList.add('hidden');
+  }
+}
+
 async function enviarMensaje() {
   const input = document.getElementById('msg-input');
   const texto = input.value.trim();
   if (!texto) return;
 
   agregarMensaje('usuario', texto);
+  historialChat.push({role: 'user', content: texto});
   input.value = '';
   input.style.height = '';
 
@@ -201,14 +257,29 @@ async function enviarMensaje() {
   scrollBottom();
 
   try {
-    const res = await fetch('/api/asistente/chat', {
+    const res = await fetch('/api/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({mensaje: texto})
+      body: JSON.stringify({
+        mensaje: texto,
+        materia: matNombre,
+        modo: modoActual,
+        historial: historialChat
+      })
     });
     const data = await res.json();
     typingIndicator.classList.add('hidden');
-    if (data.respuesta) agregarMensaje('ia', data.respuesta);
+    if (data.respuesta) {
+      agregarMensaje('ia', data.respuesta);
+      historialChat.push({role: 'assistant', content: data.respuesta});
+    }
+    if (data.perfil_nuevo) {
+      modoActual = 'chat';
+      bannerOnboarding.classList.add('hidden');
+      onboardingCompletadoAhora = true;
+      agregarMensaje('ia', '¡Listo! Ya te conozco un poco mejor — tus próximas planeaciones para esta materia van a reflejar tu estilo real.');
+      if (onboardingForzado) agregarBotonVolver();
+    }
   } catch(e) {
     typingIndicator.classList.add('hidden');
     agregarMensaje('ia', 'Hubo un error. Intenta de nuevo.');
@@ -220,13 +291,21 @@ function enviarSugerencia(texto) {
   enviarMensaje();
 }
 
+function cambiarMateria(nombre) {
+  matNombre = nombre;
+  limpiarChat();
+}
+
 function limpiarChat() {
   mensajesDiv.innerHTML = '';
   mensajesDiv.classList.add('hidden');
+  historialChat = [];
+  bannerOnboarding.classList.add('hidden');
   onboarding.classList.remove('hidden');
-  fetch('/api/asistente/limpiar', {method: 'POST'});
+  iniciarConversacion();
 }
 
 scrollBottom();
+iniciarConversacion();
 </script>
 {% endblock %}

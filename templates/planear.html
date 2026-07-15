@@ -463,11 +463,22 @@ function actualizarOpcionesBloque(periodo) {
 }
 
 // ---- Selección visual de materia ----
+async function verificarOnboarding(nombreMateria) {
+  try {
+    const res  = await fetch(`/api/onboarding/estado?materia=${encodeURIComponent(nombreMateria)}`);
+    const data = await res.json();
+    if (data.ok && data.necesita_onboarding) {
+      window.location.href = `/asistente?materia=${encodeURIComponent(nombreMateria)}&onboarding=1`;
+    }
+  } catch (e) { /* si falla, dejamos seguir normal */ }
+}
+
 function seleccionarMateria(key, card) {
   matKey = key;
   matNombre = card.dataset.nombre;
   cursos = MATERIAS_DATA[key]?.cursos || [];
   cargarPeriodos();
+  verificarOnboarding(matNombre);
   document.querySelectorAll('.mat-card').forEach(c => {
     c.style.borderColor = 'rgba(59,107,245,0.2)';
     c.style.background = 'rgba(59,107,245,0.04)';

@@ -659,7 +659,25 @@ def asistente():
     perfiles = cargar_perfiles()
     mats     = get_materias(perfiles, nombre)
     año      = get_año(perfiles, nombre)
-    return render_template("asistente.html", nombre=nombre, año=año, materias=mats)
+    materia_qs   = sanitize(request.args.get("materia", ""), "nombre")
+    onboarding_qs = request.args.get("onboarding", "") == "1"
+    return render_template("asistente.html", nombre=nombre, año=año, materias=mats,
+        materia_inicial=materia_qs, onboarding_forzado=onboarding_qs)
+
+@app.route("/api/onboarding/estado")
+def onboarding_estado():
+    """Indica si falta hacerle la introduccion (onboarding) al profesor
+    para esta materia en el año activo."""
+    nombre = usuario_actual()
+    if not nombre: return jsonify({"ok": False})
+    perfiles   = cargar_perfiles()
+    mat_nombre = sanitize(request.args.get("materia", ""), "nombre")
+    if not mat_nombre:
+        return jsonify({"ok": True, "necesita_onboarding": False})
+    año = get_año(perfiles, nombre)
+    mem = cargar_memoria(nombre, mat_nombre)
+    necesita = (not mem.get("estilo")) or (mem.get("estilo_año") != año)
+    return jsonify({"ok": True, "necesita_onboarding": necesita})
 
 @app.route("/api/chat/inicio", methods=["POST"])
 @limiter.limit("30 per minute")
@@ -680,9 +698,10 @@ def chat_inicio():
     proveedor = get_proveedor()
     mem       = cargar_memoria(nombre, mat_nombre)
     estilo    = mem.get("estilo", "")
+    año       = get_año(perfiles, nombre)
     nc        = nombre.split()[0]
 
-    es_primera_vez = not estilo
+    es_primera_vez = (not estilo) or (mem.get("estilo_año") != año)
 
     if es_primera_vez:
         sistema = f"""Eres un asistente pedagógico que está conociendo a {nc}, profesor de {mat_nombre}, por primera vez.
@@ -837,6 +856,7 @@ Máximo 3 líneas. Usa el nombre {nc}. Tono de colega."""
             perfil_nuevo = partes[1].strip() if len(partes) > 1 else ""
             if perfil_nuevo:
                 mem["estilo"] = perfil_nuevo
+                mem["estilo_año"] = get_año(perfiles, nombre)
                 guardar_memoria(nombre, mat_nombre, mem)
 
         return jsonify({
