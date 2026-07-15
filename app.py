@@ -388,6 +388,20 @@ def set_materias(perfiles, nombre, mats):
     año = get_año(perfiles, nombre)
     perfiles[nombre]["años"][año]["materias"] = mats
     guardar_perfiles(perfiles)
+
+def get_periodos_semanas(perfiles, nombre):
+    """Calendario de semanas por periodo, compartido entre TODAS las materias
+    del profesor para el año activo (los periodos del colegio son los mismos
+    sin importar la materia)."""
+    año = get_año(perfiles, nombre)
+    return perfiles[nombre]["años"].get(año, {}).get("periodos_semanas", {})
+
+def set_periodo_semanas(perfiles, nombre, num_periodo, semanas):
+    año = get_año(perfiles, nombre)
+    if "periodos_semanas" not in perfiles[nombre]["años"][año]:
+        perfiles[nombre]["años"][año]["periodos_semanas"] = {}
+    perfiles[nombre]["años"][año]["periodos_semanas"][str(num_periodo)] = semanas
+    guardar_perfiles(perfiles)
     return perfiles
 
 def usuario_actual():
@@ -624,6 +638,12 @@ def guardar_periodo():
     tema       = sanitize(data.get("tema_central", ""), "text")
     bloques    = sanitize_dict_keys(data.get("bloques", {}))
 
+    # Las semanas del periodo son el mismo calendario del colegio para
+    # todas las materias del profesor — se guardan una sola vez y aplican
+    # a todas, sin importar desde qué materia se editen.
+    perfiles = cargar_perfiles()
+    set_periodo_semanas(perfiles, nombre, num_per, semanas)
+
     mem = cargar_memoria(nombre, mat_nombre)
     if "periodos" not in mem: mem["periodos"] = {}
     proyecto       = sanitize(data.get("proyecto", ""), "text")
@@ -645,8 +665,30 @@ def obtener_periodos():
     nombre   = usuario_actual()
     if not nombre: return jsonify({"ok": False})
     materia  = request.args.get("materia", "")
+    perfiles = cargar_perfiles()
     mem      = cargar_memoria(nombre, materia)
-    return jsonify({"ok": True, "periodos": mem.get("periodos", {})})
+    periodos = dict(mem.get("periodos", {}))
+    semanas_compartidas = get_periodos_semanas(perfiles, nombre)
+
+    # Fusionar: la fuente de verdad para "semanas" es la compartida por año.
+    # Si un periodo todavia no tiene semanas compartidas pero esta materia
+    # si tiene un valor guardado de antes, lo usamos como semilla (migracion
+    # automatica silenciosa) para que quede igual en todas las materias.
+    cambio = False
+    for num_per, info in periodos.items():
+        if num_per in semanas_compartidas:
+            info["semanas"] = semanas_compartidas[num_per]
+        elif info.get("semanas"):
+            set_periodo_semanas(perfiles, nombre, num_per, info["semanas"])
+            semanas_compartidas[num_per] = info["semanas"]
+            cambio = True
+    # Tambien exponer periodos que tengan semanas compartidas pero que esta
+    # materia aun no haya configurado con tema/bloques.
+    for num_per, semanas in semanas_compartidas.items():
+        if num_per not in periodos:
+            periodos[num_per] = {"semanas": semanas, "tema_central": "", "bloques": {}}
+
+    return jsonify({"ok": True, "periodos": periodos})
 
 # ─────────────────────────────────────────────
 # RUTAS — CHAT IA
