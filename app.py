@@ -1772,6 +1772,48 @@ def enviar_plataforma():
                     log("info", f"{curso}: fecha seleccionada — {resultado_fechas.get('texto', '?')}")
                     time.sleep(3)
 
+                    # fechasinifin() puede correr sin error y aun asi dejar INI/FIN
+                    # vacios. Como las fechas estan escritas en el texto de la
+                    # opcion, las sacamos de ahi y llenamos los campos nosotros.
+                    try:
+                        relleno = driver.execute_script("""
+                            function val(id){var e=document.getElementById(id);
+                                return e ? (e.value||'') : null;}
+                            if(val('INI') && val('FIN'))
+                                return {hizo_falta:false, ini:val('INI'), fin:val('FIN')};
+                            var f=document.getElementById('FECHAS');
+                            if(!f || f.selectedIndex<0)
+                                return {hizo_falta:true, ok:false, motivo:'sin opcion elegida'};
+                            var txt=f.options[f.selectedIndex].text||'';
+                            var fechas=txt.match(/\\d{4}-\\d{2}-\\d{2}/g);
+                            if(!fechas || fechas.length<2)
+                                return {hizo_falta:true, ok:false,
+                                        motivo:'no se hallaron 2 fechas en "'+txt+'"'};
+                            function set(id,v){var e=document.getElementById(id);
+                                if(!e) return;
+                                e.disabled=false;e.removeAttribute('disabled');
+                                e.removeAttribute('readonly');
+                                e.value=v;
+                                e.dispatchEvent(new Event('input',{bubbles:true}));
+                                e.dispatchEvent(new Event('change',{bubbles:true}));}
+                            set('INI',fechas[0]);            set('FIN',fechas[1]);
+                            set('DATE_NAME_INI',fechas[0]);  set('DATE_NAME_FIN',fechas[1]);
+                            return {hizo_falta:true, ok:(val('INI')!=='' && val('FIN')!==''),
+                                    ini:val('INI'), fin:val('FIN')};
+                        """)
+                    except Exception as ex_rel:
+                        relleno = {"hizo_falta": True, "ok": False,
+                                   "motivo": type(ex_rel).__name__}
+
+                    if relleno and relleno.get("hizo_falta"):
+                        if relleno.get("ok"):
+                            log("info", f"{curso}: INI/FIN venian vacios — rellenados a mano "
+                                        f"({relleno.get('ini')} a {relleno.get('fin')})")
+                        else:
+                            log("warn", f"{curso}: INI/FIN vacios y no se pudieron rellenar "
+                                        f"({relleno.get('motivo', '?')})")
+                    time.sleep(1)
+
                     # Esperar campos de texto
                     try:
                         WebDriverWait(driver, 45).until(
@@ -1876,6 +1918,24 @@ def enviar_plataforma():
                         log("info", f"{curso}: campos de fecha antes de guardar — {campos_fecha}")
                     except Exception as ex_cf:
                         log("warn", f"{curso}: no se pudieron leer los campos de fecha ({type(ex_cf).__name__})")
+
+                    # Si INI/FIN siguen vacios, guardar solo produce el modal de
+                    # error. Mejor abortar el curso con un mensaje claro.
+                    try:
+                        ini_fin = driver.execute_script(
+                            "function v(i){var e=document.getElementById(i);"
+                            "return e?(e.value||''):'';}"
+                            "return [v('INI'), v('FIN')];") or ["", ""]
+                    except Exception:
+                        ini_fin = ["", ""]
+
+                    if not ini_fin[0] or not ini_fin[1]:
+                        log("warn", f"{curso}: INI/FIN vacios — no se pulsa Guardar porque "
+                                    f"la plataforma lo rechazaria. Revisa si el bloque elegido "
+                                    f"ya fue planeado antes.")
+                        _capturar_debug(driver, f"{curso}_ini_fin_vacios")
+                        err_list.append(curso)
+                        continue
 
                     # Guardar UNA sola vez
                     driver.execute_script("document.getElementById('buttonx1').click();")
