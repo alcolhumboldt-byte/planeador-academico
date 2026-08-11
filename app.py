@@ -1961,14 +1961,21 @@ def enviar_plataforma():
                         try:
                             texto_modal = driver.execute_script("""
                                 var n = arguments[0];
-                                var propio = (n.innerText || n.value || '').trim();
+                                function textoSinBotones(el){
+                                    var clon = el.cloneNode(true);
+                                    var botones = clon.querySelectorAll(
+                                        'button, input[type=button], input[type=submit], .btnok, .btncancel, a');
+                                    for(var i=0;i<botones.length;i++)
+                                        botones[i].parentNode.removeChild(botones[i]);
+                                    return (clon.innerText||'').trim();
+                                }
                                 n = n.parentElement;
-                                for (var i = 0; i < 6 && n; i++) {
-                                    var t = (n.innerText || '').trim();
-                                    if (t.length > propio.length + 5) return t;
+                                for (var i = 0; i < 8 && n; i++) {
+                                    var t = textoSinBotones(n);
+                                    if (t.length > 3) return t;
                                     n = n.parentElement;
                                 }
-                                return propio;
+                                return '(sin texto fuera de los botones)';
                             """, btn_ok) or ""
                         except Exception:
                             texto_modal = ""
