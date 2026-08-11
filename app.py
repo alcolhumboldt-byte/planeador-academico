@@ -1981,9 +1981,15 @@ def enviar_plataforma():
                             texto_modal = ""
                         _capturar_debug(driver, f"{curso}_modal")
                         if texto_modal:
-                            limpio_modal = " ".join(texto_modal.split())[:200]
+                            limpio_modal = " ".join(texto_modal.split())[:400]
                             log("info", f"{curso}: el modal dice — {limpio_modal}")
-                        btn_ok.click()
+                        try:
+                            btn_ok.click()
+                        except Exception:
+                            # El clic nativo puede ser interceptado por otro
+                            # elemento encima (overlay del propio modal). El
+                            # clic por JS no depende de que nada lo tape.
+                            driver.execute_script("arguments[0].click();", btn_ok)
                         log("info", f"{curso}: modal de confirmacion aceptado")
                         time.sleep(2)
                     except TimeoutException:
