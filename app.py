@@ -13,7 +13,7 @@ import webbrowser
 import threading
 import time
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_file
 
 # Cargar variables de entorno desde .env
 try:
@@ -255,6 +255,31 @@ URL_AULA_V = "https://www.colhumboldt.controlacademico.com/AulaVirtual/preguntas
 PAUSA      = 4
 TIMEOUT    = 45
 RUTA_CONFIG  = os.path.join(CARPETA_DATOS, "config.json")
+CARPETA_DEBUG = os.path.join(CARPETA_DATOS, "debug")
+
+
+def _capturar_debug(driver, etiqueta):
+    """Guarda pantallazo + HTML de lo que el navegador esta viendo.
+    Sirve para diagnosticar fallos de Selenium en el servidor headless,
+    donde no hay forma de mirar la pantalla. Nunca lanza excepcion."""
+    try:
+        os.makedirs(CARPETA_DEBUG, exist_ok=True)
+        sello = datetime.now().strftime("%Y%m%d_%H%M%S")
+        limpio = "".join(c for c in str(etiqueta) if c.isalnum() or c in "-_")[:40]
+        base = os.path.join(CARPETA_DEBUG, f"{sello}_{limpio}")
+        try:
+            driver.save_screenshot(base + ".png")
+        except Exception:
+            pass
+        try:
+            with open(base + ".html", "w", encoding="utf-8") as fh:
+                fh.write(driver.page_source)
+        except Exception:
+            pass
+        return os.path.basename(base)
+    except Exception:
+        return None
+
 
 def cargar_config():
     if not os.path.exists(RUTA_CONFIG): return {}
@@ -498,6 +523,30 @@ def debug_api_key():
         "env_var":     resumen(key_env),
         "key_activa":  resumen(key_activa),
     })
+
+@app.route("/api/admin/capturas")
+def admin_listar_capturas():
+    """Lista las capturas de diagnostico de Selenium. Requiere ?clave=ADMIN_KEY."""
+    if request.args.get("clave", "") != os.environ.get("ADMIN_KEY", "") or not os.environ.get("ADMIN_KEY", ""):
+        return jsonify({"ok": False, "error": "No autorizado"}), 403
+    try:
+        archivos = sorted(os.listdir(CARPETA_DEBUG), reverse=True)
+    except FileNotFoundError:
+        archivos = []
+    return jsonify({"ok": True, "carpeta": CARPETA_DEBUG, "archivos": archivos})
+
+
+@app.route("/api/admin/captura/<nombre>")
+def admin_ver_captura(nombre):
+    """Descarga una captura puntual. Requiere ?clave=ADMIN_KEY."""
+    if request.args.get("clave", "") != os.environ.get("ADMIN_KEY", "") or not os.environ.get("ADMIN_KEY", ""):
+        return jsonify({"ok": False, "error": "No autorizado"}), 403
+    seguro = os.path.basename(nombre)
+    ruta = os.path.join(CARPETA_DEBUG, seguro)
+    if not os.path.isfile(ruta):
+        return jsonify({"ok": False, "error": "No existe"}), 404
+    return send_file(ruta)
+
 
 @app.route("/api/admin/configurar", methods=["POST"])
 @limiter.limit("5 per hour")
@@ -1687,7 +1736,9 @@ def enviar_plataforma():
                     driver.execute_script("""
                         function set(id,val){
                             var el=document.getElementById(id);if(!el)return;
-                            el.disabled=false;el.removeAttribute('disabled');el.value=val;}
+                            el.disabled=false;el.removeAttribute('disabled');el.value=val;
+                            el.dispatchEvent(new Event('input',{bubbles:true}));
+                            el.dispatchEvent(new Event('change',{bubbles:true}));}
                         set('TXT_TEMAS',arguments[0]);
                         set('TXT_ACTIVIDADES',arguments[1]);
                         set('TXT_RECURSOS1',arguments[2]);
@@ -1695,18 +1746,42 @@ def enviar_plataforma():
                     """, tarea["titulo"], tarea["actividades"], tarea["recursos"])
                     time.sleep(2)
 
+                    # Confirmar que los campos quedaron llenos de verdad
+                    try:
+                        largo_temas = driver.execute_script(
+                            "var e=document.getElementById('TXT_TEMAS');"
+                            "return e ? e.value.length : -1;")
+                        if largo_temas is not None and largo_temas <= 0:
+                            log("warn", f"{curso}: TXT_TEMAS quedo vacio antes de guardar")
+                            _capturar_debug(driver, f"{curso}_campos_vacios")
+                    except Exception:
+                        pass
+
                     # Guardar UNA sola vez
                     driver.execute_script("document.getElementById('buttonx1').click();")
                     time.sleep(4)
 
-                    # Cerrar modal
+                    # Alerta nativa de JavaScript: si aparece y nadie la acepta,
+                    # bloquea el navegador y el curso siguiente se cuelga
                     try:
-                        WebDriverWait(driver, 6).until(
+                        alerta = driver.switch_to.alert
+                        texto_alerta = alerta.text[:120]
+                        alerta.accept()
+                        log("info", f"{curso}: alerta del sitio aceptada — {texto_alerta}")
+                        time.sleep(2)
+                    except Exception:
+                        pass
+
+                    # Modal de confirmacion (.btnok) — antes se ignoraba en silencio
+                    try:
+                        WebDriverWait(driver, 20).until(
                             EC.element_to_be_clickable(
                                 (By.CSS_SELECTOR, ".btnok"))).click()
+                        log("info", f"{curso}: modal de confirmacion aceptado")
                         time.sleep(2)
                     except TimeoutException:
-                        pass
+                        log("warn", f"{curso}: no aparecio el modal .btnok en 20s")
+                        _capturar_debug(driver, f"{curso}_sin_modal")
 
                     # Verificar tabla
                     try:
@@ -1724,6 +1799,9 @@ def enviar_plataforma():
                             ok_list.append(curso)
                         elif nuevas == 0:
                             log("warn", f"{curso}: no se detectó fila nueva — verifica manualmente")
+                            cap = _capturar_debug(driver, f"{curso}_sin_fila")
+                            if cap:
+                                log("info", f"{curso}: captura de diagnostico guardada ({cap})")
                             err_list.append(curso)
                         else:
                             log("warn", f"{curso}: {nuevas} filas nuevas — posible doble guardado")
