@@ -1721,11 +1721,16 @@ def enviar_plataforma():
                         if(!f) return {ok:false, motivo:'no existe FECHAS'};
                         f.disabled=false;f.removeAttribute('disabled');
                         for(var i=0;i<f.options.length;i++){
+                            if(f.options[i].disabled)
+                                f.options[i].setAttribute('data-estaba-disabled','1');
                             f.options[i].disabled=false;
                             f.options[i].removeAttribute('disabled');}
                         var encontrado=-1;
+                        var venia_bloqueado=false;
                         for(var j=0;j<f.options.length;j++){
                             if(f.options[j].value===arguments[0]){encontrado=j;break;}}
+                        if(encontrado>=0){
+                            venia_bloqueado = (f.options[encontrado].getAttribute('data-estaba-disabled')==='1');}
                         var disponibles=[];
                         for(var k=0;k<f.options.length;k++){
                             disponibles.push(f.options[k].value+'='+f.options[k].text);}
@@ -1735,7 +1740,7 @@ def enviar_plataforma():
                         f.selectedIndex=encontrado;
                         f.dispatchEvent(new Event('change',{bubbles:true}));
                         try{if(typeof fechasinifin==='function')fechasinifin(arguments[0]);}catch(e){}
-                        return {ok:true, valor:f.value,
+                        return {ok:true, valor:f.value, bloqueado:venia_bloqueado,
                                 texto:f.options[f.selectedIndex].text,
                                 disponibles:disponibles};
                     """, b_val)
@@ -1748,6 +1753,11 @@ def enviar_plataforma():
                         _capturar_debug(driver, f"{curso}_fecha_no_fijada")
                         err_list.append(curso)
                         continue
+
+                    if resultado_fechas.get("bloqueado"):
+                        log("warn", f"{curso}: OJO — la plataforma tiene el bloque '{b_val}' "
+                                    f"deshabilitado ({resultado_fechas.get('texto','?')}). "
+                                    f"Se intentara igual, pero es probable que el sitio lo rechace.")
 
                     log("info", f"{curso}: fecha seleccionada — {resultado_fechas.get('texto', '?')}")
                     time.sleep(3)
