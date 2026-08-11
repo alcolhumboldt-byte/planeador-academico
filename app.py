@@ -1739,8 +1739,14 @@ def enviar_plataforma():
                                     disponibles:disponibles};}
                         f.selectedIndex=encontrado;
                         f.dispatchEvent(new Event('change',{bubbles:true}));
-                        try{if(typeof fechasinifin==='function')fechasinifin(arguments[0]);}catch(e){}
+                        var estado_fn='no existe';
+                        try{
+                            if(typeof fechasinifin==='function'){
+                                fechasinifin(arguments[0]);
+                                estado_fn='ok';}
+                        }catch(e){estado_fn='ERROR: '+(e && e.message ? e.message : e);}
                         return {ok:true, valor:f.value, bloqueado:venia_bloqueado,
+                                fn:estado_fn,
                                 texto:f.options[f.selectedIndex].text,
                                 disponibles:disponibles};
                     """, b_val)
@@ -1758,6 +1764,10 @@ def enviar_plataforma():
                         log("warn", f"{curso}: OJO — la plataforma tiene el bloque '{b_val}' "
                                     f"deshabilitado ({resultado_fechas.get('texto','?')}). "
                                     f"Se intentara igual, pero es probable que el sitio lo rechace.")
+
+                    estado_fn = resultado_fechas.get("fn", "?")
+                    if estado_fn != "ok":
+                        log("warn", f"{curso}: fechasinifin() — {estado_fn}")
 
                     log("info", f"{curso}: fecha seleccionada — {resultado_fechas.get('texto', '?')}")
                     time.sleep(3)
