@@ -1796,6 +1796,46 @@ def enviar_plataforma():
                     except Exception:
                         pass
 
+                    # Reafirmar FECHAS JUSTO ANTES de guardar. Entre la seleccion
+                    # original y este punto pasan varios segundos: si el sitio
+                    # vuelve a pintar el desplegable, la seleccion se pierde y
+                    # queda '---SELECCIONE---' (value vacio), que es exactamente
+                    # lo que dispara "Aun no ha seleccionado ninguna fecha".
+                    estado_fecha = driver.execute_script("""
+                        var f=document.getElementById('FECHAS');
+                        if(!f) return {ok:false, motivo:'FECHAS desaparecio'};
+                        if(f.value === arguments[0])
+                            return {ok:true, rehecho:false, valor:f.value};
+                        f.disabled=false;f.removeAttribute('disabled');
+                        for(var i=0;i<f.options.length;i++){
+                            f.options[i].disabled=false;
+                            f.options[i].removeAttribute('disabled');}
+                        for(var j=0;j<f.options.length;j++){
+                            if(f.options[j].value===arguments[0]){
+                                f.selectedIndex=j;
+                                f.dispatchEvent(new Event('change',{bubbles:true}));
+                                try{if(typeof fechasinifin==='function')
+                                    fechasinifin(arguments[0]);}catch(e){}
+                                return {ok:(f.value===arguments[0]), rehecho:true,
+                                        valor:f.value};}}
+                        return {ok:false, motivo:'bloque ya no esta en la lista',
+                                valor:f.value};
+                    """, b_val)
+
+                    if not estado_fecha or not estado_fecha.get("ok"):
+                        motivo = (estado_fecha or {}).get("motivo", "valor no quedo fijado")
+                        valor = (estado_fecha or {}).get("valor", "?")
+                        log("warn", f"{curso}: la fecha se perdio antes de guardar "
+                                    f"({motivo}, value='{valor}') — no se guarda para "
+                                    f"no crear una planeacion sin fecha")
+                        _capturar_debug(driver, f"{curso}_fecha_perdida")
+                        err_list.append(curso)
+                        continue
+
+                    if estado_fecha.get("rehecho"):
+                        log("info", f"{curso}: la fecha se habia perdido y se volvio a fijar")
+                        time.sleep(1)
+
                     # Guardar UNA sola vez
                     driver.execute_script("document.getElementById('buttonx1').click();")
                     time.sleep(4)
