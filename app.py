@@ -1700,25 +1700,56 @@ def enviar_plataforma():
                         log("warn", f"{curso}: FECHAS no apareció — saltando")
                         err_list.append(curso)
                         continue
-                    time.sleep(2)
+                    # Esperar a que FECHAS tenga opciones DE VERDAD.
+                    # Antes solo se esperaba a que el <select> existiera: si las
+                    # opciones aun no habian cargado, el codigo inventaba una
+                    # opcion falsa y el sitio terminaba sin ninguna fecha real.
+                    try:
+                        WebDriverWait(driver, 30).until(
+                            lambda d: d.execute_script(
+                                "var f=document.getElementById('FECHAS');"
+                                "return f ? f.options.length : 0;") > 1)
+                    except TimeoutException:
+                        log("warn", f"{curso}: FECHAS quedo sin opciones — saltando")
+                        _capturar_debug(driver, f"{curso}_fechas_vacias")
+                        err_list.append(curso)
+                        continue
 
-                    # Forzar FECHAS
-                    driver.execute_script("""
+                    # Seleccionar el bloque SIN inventar opciones inexistentes
+                    resultado_fechas = driver.execute_script("""
                         var f=document.getElementById('FECHAS');
-                        if(!f)return;
+                        if(!f) return {ok:false, motivo:'no existe FECHAS'};
                         f.disabled=false;f.removeAttribute('disabled');
                         for(var i=0;i<f.options.length;i++){
                             f.options[i].disabled=false;
                             f.options[i].removeAttribute('disabled');}
-                        var e=false;
+                        var encontrado=-1;
                         for(var j=0;j<f.options.length;j++){
-                            if(f.options[j].value===arguments[0]){f.selectedIndex=j;e=true;break;}}
-                        if(!e){var o=document.createElement('option');
-                            o.value=arguments[0];o.text='Bloque '+arguments[0];
-                            f.appendChild(o);f.value=arguments[0];}
+                            if(f.options[j].value===arguments[0]){encontrado=j;break;}}
+                        var disponibles=[];
+                        for(var k=0;k<f.options.length;k++){
+                            disponibles.push(f.options[k].value+'='+f.options[k].text);}
+                        if(encontrado<0){
+                            return {ok:false, motivo:'bloque no esta en la lista',
+                                    disponibles:disponibles};}
+                        f.selectedIndex=encontrado;
                         f.dispatchEvent(new Event('change',{bubbles:true}));
                         try{if(typeof fechasinifin==='function')fechasinifin(arguments[0]);}catch(e){}
+                        return {ok:true, valor:f.value,
+                                texto:f.options[f.selectedIndex].text,
+                                disponibles:disponibles};
                     """, b_val)
+
+                    if not resultado_fechas or not resultado_fechas.get("ok"):
+                        motivo = (resultado_fechas or {}).get("motivo", "desconocido")
+                        disp = (resultado_fechas or {}).get("disponibles", [])
+                        log("warn", f"{curso}: no se pudo fijar la fecha ({motivo}) — "
+                                    f"bloque pedido '{b_val}', opciones reales: {disp}")
+                        _capturar_debug(driver, f"{curso}_fecha_no_fijada")
+                        err_list.append(curso)
+                        continue
+
+                    log("info", f"{curso}: fecha seleccionada — {resultado_fechas.get('texto', '?')}")
                     time.sleep(3)
 
                     # Esperar campos de texto
