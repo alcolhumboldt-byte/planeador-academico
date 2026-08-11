@@ -474,6 +474,31 @@ def registro():
     session["usuario"] = nombre
     return jsonify({"ok": True})
 
+@app.route("/api/admin/debug_api_key")
+def debug_api_key():
+    """Diagnostico temporal: muestra de donde sale la key y su longitud/prefijo,
+    sin exponerla completa. Requiere ?clave=ADMIN_KEY."""
+    clave_admin = request.args.get("clave", "")
+    CLAVE_ADMIN = os.environ.get("ADMIN_KEY", "")
+    if not CLAVE_ADMIN or clave_admin != CLAVE_ADMIN:
+        return jsonify({"ok": False, "error": "No autorizado"}), 403
+    config = cargar_config()
+    key_config = config.get("api_key", "")
+    key_env    = os.environ.get("AI_API_KEY", "")
+    key_activa = get_api_key()
+
+    def resumen(k):
+        if not k: return None
+        return {"largo": len(k), "empieza": k[:12], "termina": k[-4:]}
+
+    return jsonify({
+        "ok": True,
+        "fuente_usada": "config.json" if config.get("api_key") else ("env AI_API_KEY" if key_env else "ninguna"),
+        "config_json": resumen(key_config),
+        "env_var":     resumen(key_env),
+        "key_activa":  resumen(key_activa),
+    })
+
 @app.route("/api/admin/configurar", methods=["POST"])
 @limiter.limit("5 per hour")
 def admin_configurar():
