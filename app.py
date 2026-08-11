@@ -183,7 +183,15 @@ def _crear_driver_chrome():
     else:
         service = Service(ChromeDriverManager().install())
 
-    return webdriver.Chrome(service=service, options=opts)
+    driver = webdriver.Chrome(service=service, options=opts)
+    # Sin estos timeouts, si una pagina nunca termina de cargar el driver
+    # se queda esperando para siempre y toda la tanda se cuelga en silencio.
+    try:
+        driver.set_page_load_timeout(60)
+        driver.set_script_timeout(30)
+    except Exception:
+        pass
+    return driver
 
 
 app = Flask(__name__)
@@ -1772,11 +1780,31 @@ def enviar_plataforma():
                     except Exception:
                         pass
 
-                    # Modal de confirmacion (.btnok) — antes se ignoraba en silencio
+                    # Modal de confirmacion (.btnok): leer QUE dice antes de aceptarlo,
+                    # porque puede ser un mensaje de error y no una confirmacion de exito
                     try:
-                        WebDriverWait(driver, 20).until(
+                        btn_ok = WebDriverWait(driver, 20).until(
                             EC.element_to_be_clickable(
-                                (By.CSS_SELECTOR, ".btnok"))).click()
+                                (By.CSS_SELECTOR, ".btnok")))
+                        try:
+                            texto_modal = driver.execute_script("""
+                                var n = arguments[0];
+                                var propio = (n.innerText || n.value || '').trim();
+                                n = n.parentElement;
+                                for (var i = 0; i < 6 && n; i++) {
+                                    var t = (n.innerText || '').trim();
+                                    if (t.length > propio.length + 5) return t;
+                                    n = n.parentElement;
+                                }
+                                return propio;
+                            """, btn_ok) or ""
+                        except Exception:
+                            texto_modal = ""
+                        _capturar_debug(driver, f"{curso}_modal")
+                        if texto_modal:
+                            limpio_modal = " ".join(texto_modal.split())[:200]
+                            log("info", f"{curso}: el modal dice — {limpio_modal}")
+                        btn_ok.click()
                         log("info", f"{curso}: modal de confirmacion aceptado")
                         time.sleep(2)
                     except TimeoutException:
