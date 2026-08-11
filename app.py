@@ -82,7 +82,7 @@ def sanitize(value, tipo="text", max_len=500):
         "text":     200,
         "nombre":   100,
         "codigo":   10,
-        "password": 128,
+        "password": 300,  # suficiente para API keys largas
         "año":      4,
         "url":      500,
         "textarea": 2000,

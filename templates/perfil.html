@@ -153,16 +153,11 @@
               <h3 class="text-base font-medium text-on-surface">API Key de IA</h3>
             </div>
             <form id="form-apikey" action="/api/perfil/cambiar_api_key" class="space-y-md">
-              <div class="relative">
-                <input name="api_key" type="password" id="api-key-input"
-                  placeholder="sk-ant-..."
-                  value="{{ api_key_hint or '' }}"
-                  class="w-full rounded-xl border border-outline-variant py-sm px-md pr-[40px] text-xs bg-surface focus:ring-2 focus:ring-primary focus:border-primary font-mono"/>
-                <button type="button" onclick="togglePass('api-key-input','api-key-icon')"
-                  class="absolute inset-y-0 right-0 pr-sm flex items-center text-outline">
-                  <span class="material-symbols-outlined text-[16px]" id="api-key-icon">visibility</span>
-                </button>
-              </div>
+              <textarea name="api_key" id="api-key-input" rows="3"
+                placeholder="sk-ant-..."
+                oninput="document.getElementById('api-key-count').textContent = this.value.trim().length + ' caracteres';"
+                class="w-full rounded-xl border border-outline-variant py-sm px-md text-xs bg-surface focus:ring-2 focus:ring-primary focus:border-primary font-mono resize-y break-all leading-relaxed">{{ api_key_hint or '' }}</textarea>
+              <p id="api-key-count" class="text-xs text-on-surface-variant">Pega tu key completa — se ve entera aquí, sin cortar.</p>
               <button type="submit"
                 class="w-full bg-tertiary text-on-tertiary py-sm rounded-xl text-sm font-medium hover:opacity-90 transition-all">
                 Guardar API Key
