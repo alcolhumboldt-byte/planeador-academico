@@ -1846,6 +1846,27 @@ def enviar_plataforma():
                         log("info", f"{curso}: la fecha se habia perdido y se volvio a fijar")
                         time.sleep(1)
 
+                    # Volcar TODOS los campos de fecha del formulario. El sitio no
+                    # valida el <select>, valida los campos que fechasinifin() debe
+                    # rellenar: si llegan vacios, ahi esta la falla.
+                    try:
+                        campos_fecha = driver.execute_script("""
+                            var salida=[];
+                            var todos=document.querySelectorAll('input,select,textarea');
+                            for(var i=0;i<todos.length;i++){
+                                var el=todos[i];
+                                var id=(el.id||'')+'|'+(el.name||'');
+                                if(id.toUpperCase().indexOf('FECHA')>=0 ||
+                                   id.toUpperCase().indexOf('INI')>=0 ||
+                                   id.toUpperCase().indexOf('FIN')>=0){
+                                    salida.push((el.id||el.name||'?')+'='+
+                                                JSON.stringify(el.value||''));}}
+                            return salida;
+                        """)
+                        log("info", f"{curso}: campos de fecha antes de guardar — {campos_fecha}")
+                    except Exception as ex_cf:
+                        log("warn", f"{curso}: no se pudieron leer los campos de fecha ({type(ex_cf).__name__})")
+
                     # Guardar UNA sola vez
                     driver.execute_script("document.getElementById('buttonx1').click();")
                     time.sleep(4)
