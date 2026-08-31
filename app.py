@@ -2646,6 +2646,14 @@ def verificar_planeaciones():
 
             log("ok", "Sesión iniciada — comenzando verificación")
 
+            # Sin estos timeouts, Selenium espera indefinidamente y el proceso
+            # queda colgado sin lanzar excepción (mismo bug del módulo de envío)
+            try:
+                driver.set_page_load_timeout(60)
+                driver.set_script_timeout(30)
+            except Exception:
+                pass
+
             # Ir a Planes de Área
             driver.get(URL_PLANES)
             time.sleep(PAUSA + 2)
@@ -2731,10 +2739,26 @@ def verificar_planeaciones():
                             time.sleep(1)
 
                             # Click en Listar
+                            log("info", f"  · {asig['nombre']}: listando...")
                             driver.execute_script("document.getElementById('buttonx').click();")
                             time.sleep(4)
 
+                            # Si la plataforma abrió un modal, cerrarlo para no bloquear
+                            try:
+                                driver.execute_script("""
+                                    document.querySelectorAll('.modal.show, .modal[style*="display: block"]')
+                                        .forEach(function(m){
+                                            m.style.display='none';
+                                            m.classList.remove('show');
+                                        });
+                                    document.querySelectorAll('.modal-backdrop').forEach(function(b){b.remove();});
+                                    document.body.classList.remove('modal-open');
+                                """)
+                            except Exception:
+                                pass
+
                             # Leer la tabla de planeaciones
+                            log("info", f"  · {asig['nombre']}: leyendo tabla...")
                             filas = driver.find_elements(By.CSS_SELECTOR, "table tr")
                             filas_datos = [
                                 f for f in filas
