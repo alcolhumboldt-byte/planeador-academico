@@ -2745,6 +2745,25 @@ def verificar_planeaciones():
                     # Verificar cada asignatura
                     for asig in asigs:
                         try:
+                            # Cada clic en Listar recarga la pagina y CURSO vuelve
+                            # a su valor por defecto (el primero de la lista).
+                            # Hay que reseleccionarlo antes de cada materia, o se
+                            # fuerza una asignatura sobre el curso equivocado y la
+                            # pagina queda esperando indefinidamente.
+                            try:
+                                el_c2 = WebDriverWait(driver, TIMEOUT).until(
+                                    EC.presence_of_element_located((By.ID, "CURSO")))
+                                if el_c2.get_attribute("value") != curso["codigo"]:
+                                    Select(el_c2).select_by_value(curso["codigo"])
+                                    time.sleep(PAUSA)
+                                    WebDriverWait(driver, TIMEOUT).until(
+                                        lambda d: len(d.find_element(By.ID, "ASIGNATURA")
+                                                      .find_elements(By.TAG_NAME, "option")) > 1)
+                            except TimeoutException:
+                                _capturar_debug(driver, f"coord_recurso_{curso['codigo']}")
+                                log("warn", f"  {asig['nombre']}: no se pudo reseleccionar el curso")
+                                continue
+
                             # Seleccionar asignatura
                             driver.execute_script("""
                                 var el=document.getElementById('ASIGNATURA');
