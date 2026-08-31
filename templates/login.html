@@ -231,7 +231,7 @@ async function hacerRegistro() {
     const res  = await fetch('/registro', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ nombre, password })
+      body: JSON.stringify({ nombre, password, rol })
     });
     const data = await res.json();
     if (data.ok) {

@@ -2614,20 +2614,31 @@ def verificar_planeaciones():
         try:
             driver.get(URL_LOGIN)
             time.sleep(3)
-            log("info", "Chrome abierto — inicia sesión como COORDINADOR en la plataforma")
             log("info", "El bot solo leerá datos, no modificará nada")
 
-            # Esperar login manual (coordinador siempre entra manualmente por seguridad)
-            sesion_ok = False
-            for _ in range(180):  # 3 minutos
-                time.sleep(1)
-                try:
-                    url = driver.current_url.lower()
-                    if "login" not in url and "data:" not in url:
-                        sesion_ok = True
+            es_headless = os.environ.get("HEADLESS", "false").lower() == "true"
+
+            # Primero se intenta el login automático con las credenciales del perfil
+            sesion_ok = _login_automatico(driver, nombre, log)
+
+            if not sesion_ok and es_headless:
+                # En el servidor no hay ventana visible: no se puede pedir login manual
+                log("error", "Login automático falló y el servidor no permite login manual. "
+                             "Guarda tus credenciales del colegio en Perfil.")
+                driver.quit(); return
+
+            if not sesion_ok:
+                # Solo en local (Mac con ventana visible) se espera al usuario
+                log("info", "Chrome abierto — inicia sesión como COORDINADOR en la plataforma")
+                for _ in range(180):  # 3 minutos
+                    time.sleep(1)
+                    try:
+                        url = driver.current_url.lower()
+                        if "login" not in url and "data:" not in url:
+                            sesion_ok = True
+                            break
+                    except Exception:
                         break
-                except Exception:
-                    break
 
             if not sesion_ok:
                 log("error", "No se detectó inicio de sesión")
