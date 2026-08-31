@@ -2689,7 +2689,21 @@ def verificar_planeaciones():
                 log("info", f"[{i}/{total}] Revisando {curso['codigo']} — {curso['nombre']}...")
 
                 try:
-                    driver.get(URL_PLANES)
+                    # Reintento: la carga de la pagina puede exceder el timeout
+                    cargada = False
+                    for intento in (1, 2):
+                        try:
+                            driver.get(URL_PLANES)
+                            cargada = True
+                            break
+                        except TimeoutException:
+                            log("warn", f"  Carga lenta en {curso['codigo']}, reintento {intento}")
+                            try: driver.execute_script("window.stop();")
+                            except Exception: pass
+                    if not cargada:
+                        _capturar_debug(driver, f"coord_carga_{curso['codigo']}")
+                        log("warn", f"Error en {curso['codigo']}: no cargo Planes de Area")
+                        continue
                     time.sleep(PAUSA)
 
                     # Seleccionar curso
@@ -2697,6 +2711,18 @@ def verificar_planeaciones():
                         EC.presence_of_element_located((By.ID, "CURSO")))
                     Select(el_c).select_by_value(curso["codigo"])
                     time.sleep(PAUSA)
+
+                    # Esperar a que ASIGNATURA se repueble para este curso.
+                    # Sin esto se fuerza el select mientras la plataforma aun
+                    # responde por el curso anterior y la pagina queda colgada.
+                    try:
+                        WebDriverWait(driver, TIMEOUT).until(
+                            lambda d: len(d.find_element(By.ID, "ASIGNATURA")
+                                          .find_elements(By.TAG_NAME, "option")) > 1)
+                    except TimeoutException:
+                        _capturar_debug(driver, f"coord_asig_{curso['codigo']}")
+                        log("warn", f"  {curso['codigo']}: no cargaron las asignaturas")
+                        continue
 
                     # Leer asignaturas disponibles
                     driver.execute_script("""
@@ -2740,7 +2766,12 @@ def verificar_planeaciones():
 
                             # Click en Listar
                             log("info", f"  · {asig['nombre']}: listando...")
-                            driver.execute_script("document.getElementById('buttonx').click();")
+                            try:
+                                driver.execute_script("document.getElementById('buttonx').click();")
+                            except Exception:
+                                _capturar_debug(driver, f"coord_listar_{curso['codigo']}")
+                                log("warn", f"  {asig['nombre']}: no respondio Listar")
+                                continue
                             time.sleep(4)
 
                             # Si la plataforma abrió un modal, cerrarlo para no bloquear
