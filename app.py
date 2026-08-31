@@ -2369,6 +2369,47 @@ def agente_ejecutar():
     return jsonify({"ok": True, "session_id": session_id})
 
 
+def _preparar_selects(driver, timeout=20):
+    """En Plan_Aula los selects de asignatura y periodo NO existen al cargar:
+    se llaman select1/select2 y no tienen id. Solo cuando se elige un curso,
+    la funcion colocarsemper() de la plataforma los reconstruye como
+    ASIGNATURA y PERIODO. Sin esto el bot espera elementos inexistentes."""
+    try:
+        driver.execute_script(
+            "if (typeof colocarsemper === 'function') { colocarsemper(); }")
+    except Exception:
+        pass
+    fin = time.time() + timeout
+    while time.time() < fin:
+        try:
+            listo = driver.execute_script(
+                "var a=document.getElementById('ASIGNATURA');"
+                "return !!(a && a.options.length > 1);")
+            if listo:
+                return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return False
+
+
+def _fecha_inicio_bloque(driver, bloque):
+    """Devuelve la fecha de inicio (YYYY-MM-DD) del bloque pedido, leyendo
+    la lista de fechas que la plataforma muestra tras listar."""
+    try:
+        texto = driver.find_element(By.TAG_NAME, "body").text
+    except Exception:
+        return None
+    pares = re.findall(r"Fecha Inicio:\s*(\d{4}-\d{2}-\d{2})", texto)
+    # El primero puede ser el "Fecha Inicio de Periodo", que no es un bloque
+    if len(pares) > 1 and "Fecha Inicio de Periodo" in texto:
+        pares = pares[1:]
+    idx = int(bloque)
+    if 0 <= idx < len(pares):
+        return pares[idx]
+    return None
+
+
 def _login_automatico(driver, nombre, log):
     """Hace login automático en la plataforma del colegio."""
     perfiles = cargar_perfiles()
@@ -2712,14 +2753,8 @@ def verificar_planeaciones():
                     Select(el_c).select_by_value(curso["codigo"])
                     time.sleep(PAUSA)
 
-                    # Esperar a que ASIGNATURA se repueble para este curso.
-                    # Sin esto se fuerza el select mientras la plataforma aun
-                    # responde por el curso anterior y la pagina queda colgada.
-                    try:
-                        WebDriverWait(driver, TIMEOUT).until(
-                            lambda d: len(d.find_element(By.ID, "ASIGNATURA")
-                                          .find_elements(By.TAG_NAME, "option")) > 1)
-                    except TimeoutException:
+                    # Reconstruir ASIGNATURA/PERIODO para este curso
+                    if not _preparar_selects(driver, TIMEOUT):
                         _capturar_debug(driver, f"coord_asig_{curso['codigo']}")
                         log("warn", f"  {curso['codigo']}: no cargaron las asignaturas")
                         continue
@@ -2756,9 +2791,10 @@ def verificar_planeaciones():
                                 if el_c2.get_attribute("value") != curso["codigo"]:
                                     Select(el_c2).select_by_value(curso["codigo"])
                                     time.sleep(PAUSA)
-                                    WebDriverWait(driver, TIMEOUT).until(
-                                        lambda d: len(d.find_element(By.ID, "ASIGNATURA")
-                                                      .find_elements(By.TAG_NAME, "option")) > 1)
+                                if not _preparar_selects(driver, TIMEOUT):
+                                    _capturar_debug(driver, f"coord_recurso_{curso['codigo']}")
+                                    log("warn", f"  {asig['nombre']}: no se pudo reseleccionar el curso")
+                                    continue
                             except TimeoutException:
                                 _capturar_debug(driver, f"coord_recurso_{curso['codigo']}")
                                 log("warn", f"  {asig['nombre']}: no se pudo reseleccionar el curso")
@@ -2815,17 +2851,31 @@ def verificar_planeaciones():
                                 if len(f.find_elements(By.TAG_NAME, "td")) >= 4
                             ]
 
-                            # Verificar si hay planeación para este bloque
+                            # Verificar si hay planeacion para ESTE bloque.
+                            # Columnas reales de la tabla:
+                            # 0=No 1=Per 2=Fecha Registro 3=Fecha Inicio
+                            # 4=Fecha Final 5=Informacion 6=Accion
+                            # Antes se leia celdas[4] (Fecha Final), que siempre
+                            # tiene contenido: por eso todo salia en verde.
+                            fecha_bloque = _fecha_inicio_bloque(driver, bloque)
                             tiene_planeacion = False
                             for fila in filas_datos:
                                 celdas = fila.find_elements(By.TAG_NAME, "td")
-                                if len(celdas) >= 4:
-                                    # La fecha de inicio corresponde al bloque
-                                    s1_esperada = str(1 + int(bloque) * 2)
-                                    info = celdas[4].text.strip() if len(celdas) > 4 else ""
-                                    if info:  # hay contenido
+                                if len(celdas) < 6:
+                                    continue
+                                fecha_ini = celdas[3].text.strip()
+                                info      = celdas[5].text.strip()
+                                if not info:
+                                    continue
+                                if fecha_bloque:
+                                    if fecha_ini == fecha_bloque:
                                         tiene_planeacion = True
                                         break
+                                else:
+                                    # Sin fechas legibles no se puede afinar por
+                                    # bloque: se reporta como antes, pero avisando
+                                    tiene_planeacion = True
+                                    break
 
                             entrada = {
                                 "curso":   curso["codigo"],
