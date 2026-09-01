@@ -2753,8 +2753,12 @@ def verificar_planeaciones():
                     Select(el_c).select_by_value(curso["codigo"])
                     time.sleep(PAUSA)
 
-                    # Reconstruir ASIGNATURA/PERIODO para este curso
-                    if not _preparar_selects(driver, TIMEOUT):
+                    # Esperar a que ASIGNATURA se repueble para este curso
+                    try:
+                        WebDriverWait(driver, TIMEOUT).until(
+                            lambda d: len(d.find_element(By.ID, "ASIGNATURA")
+                                          .find_elements(By.TAG_NAME, "option")) > 1)
+                    except TimeoutException:
                         _capturar_debug(driver, f"coord_asig_{curso['codigo']}")
                         log("warn", f"  {curso['codigo']}: no cargaron las asignaturas")
                         continue
@@ -2791,10 +2795,9 @@ def verificar_planeaciones():
                                 if el_c2.get_attribute("value") != curso["codigo"]:
                                     Select(el_c2).select_by_value(curso["codigo"])
                                     time.sleep(PAUSA)
-                                if not _preparar_selects(driver, TIMEOUT):
-                                    _capturar_debug(driver, f"coord_recurso_{curso['codigo']}")
-                                    log("warn", f"  {asig['nombre']}: no se pudo reseleccionar el curso")
-                                    continue
+                                    WebDriverWait(driver, TIMEOUT).until(
+                                        lambda d: len(d.find_element(By.ID, "ASIGNATURA")
+                                                      .find_elements(By.TAG_NAME, "option")) > 1)
                             except TimeoutException:
                                 _capturar_debug(driver, f"coord_recurso_{curso['codigo']}")
                                 log("warn", f"  {asig['nombre']}: no se pudo reseleccionar el curso")
