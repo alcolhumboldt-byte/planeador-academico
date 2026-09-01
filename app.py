@@ -2729,6 +2729,27 @@ def verificar_planeaciones():
             for i, curso in enumerate(cursos, 1):
                 log("info", f"[{i}/{total}] Revisando {curso['codigo']} — {curso['nombre']}...")
 
+                # Reiniciar el navegador entre cursos. El estado que Selenium
+                # acumula tras la primera tanda deja la sesion colgada al pasar
+                # al curso siguiente; empezar limpio lo evita.
+                if i > 1:
+                    try:
+                        driver.quit()
+                    except Exception:
+                        pass
+                    try:
+                        driver = _crear_driver_chrome()
+                        driver.set_page_load_timeout(60)
+                        driver.set_script_timeout(30)
+                        driver.get(URL_LOGIN)
+                        time.sleep(2)
+                        if not _login_automatico(driver, nombre, log):
+                            log("warn", f"  {curso['codigo']}: no se pudo reabrir sesión")
+                            continue
+                    except Exception as e:
+                        log("warn", f"  {curso['codigo']}: fallo al reiniciar navegador ({str(e)[:60]})")
+                        continue
+
                 try:
                     # Reintento: la carga de la pagina puede exceder el timeout
                     cargada = False
