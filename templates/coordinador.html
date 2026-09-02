@@ -129,16 +129,35 @@
           <div id="lista-completos" class="space-y-md"></div>
         </div>
 
-        <!-- Historial -->
-        <div id="seccion-historial" class="hidden bg-surface-container rounded-3xl p-xl border border-outline-variant/20 shadow-sm">
+        <!-- Cuadricula -->
+        <div id="seccion-cuadricula" class="hidden bg-surface-container rounded-3xl p-xl border border-outline-variant/20 shadow-sm">
           <h3 class="text-base font-medium text-on-surface mb-xs flex items-center gap-sm">
-            <span class="material-symbols-outlined text-primary">monitoring</span>
-            Cumplimiento por materia
+            <span class="material-symbols-outlined text-primary">grid_view</span>
+            Mapa de cumplimiento
           </h3>
-          <p class="text-xs text-on-surface-variant mb-lg">
-            Acumulado de las verificaciones guardadas. Las materias con menor cumplimiento aparecen primero.
-          </p>
-          <div id="barras-historial" class="space-y-sm"></div>
+          <p id="cuadricula-nota" class="text-xs text-on-surface-variant mb-lg"></p>
+          <div class="overflow-x-auto">
+            <table class="text-xs border-collapse">
+              <thead id="cuadricula-head"></thead>
+              <tbody id="cuadricula-body"></tbody>
+            </table>
+          </div>
+          <div class="flex gap-md mt-lg text-[11px] text-on-surface-variant">
+            <span class="flex items-center gap-xs"><span class="inline-block w-3 h-3 rounded bg-tertiary"></span>Al día</span>
+            <span class="flex items-center gap-xs"><span class="inline-block w-3 h-3 rounded bg-primary"></span>Parcial</span>
+            <span class="flex items-center gap-xs"><span class="inline-block w-3 h-3 rounded bg-error"></span>Sin planear</span>
+            <span class="flex items-center gap-xs"><span class="inline-block w-3 h-3 rounded bg-surface-container-high"></span>No aplica</span>
+          </div>
+        </div>
+
+        <!-- Pendientes -->
+        <div id="seccion-pendientes" class="hidden bg-surface-container rounded-3xl p-xl border border-outline-variant/20 shadow-sm">
+          <h3 class="text-base font-medium text-on-surface mb-xs flex items-center gap-sm">
+            <span class="material-symbols-outlined text-error">priority_high</span>
+            Pendientes por atender
+          </h3>
+          <p class="text-xs text-on-surface-variant mb-lg">Ordenados por número de bloques sin planear.</p>
+          <div id="lista-pendientes" class="space-y-xs"></div>
         </div>
 
         <!-- Reportes guardados -->
@@ -398,33 +417,45 @@ function nuevaVerificacion() {
 }
 
 // ── Historial y reportes guardados ──────────────
-async function cargarHistorial() {
+async function cargarCuadricula() {
   try {
-    const r = await fetch('/api/coordinador/historial');
+    const r = await fetch('/api/coordinador/cuadricula');
     const d = await r.json();
-    if (!d.ok || !d.materias || !d.materias.length) return;
+    if (!d.ok || !d.filas || !d.filas.length) return;
 
-    document.getElementById('seccion-historial').classList.remove('hidden');
-    const cont = document.getElementById('barras-historial');
-    cont.innerHTML = d.materias.map(m => {
-      const color = m.cumplimiento >= 80 ? 'bg-tertiary'
-                  : m.cumplimiento >= 50 ? 'bg-primary' : 'bg-error';
-      const detalle = m.fechas.length
-        ? 'Faltó en: ' + m.fechas.join(' · ')
-        : 'Sin faltas registradas';
-      return `
-        <div>
-          <div class="flex justify-between items-baseline mb-xs">
-            <span class="text-sm text-on-surface">${m.materia}</span>
-            <span class="text-xs text-on-surface-variant">${m.cumplimiento}% · ${m.faltas} de ${m.revisadas} sin planear</span>
-          </div>
-          <div class="h-2 w-full bg-surface-container-high rounded-full overflow-hidden">
-            <div class="${color} h-2 rounded-full" style="width:${m.cumplimiento}%"></div>
-          </div>
-          <div class="text-[11px] text-on-surface-variant mt-xs">${detalle}</div>
-        </div>`;
+    // Cuadricula
+    document.getElementById('seccion-cuadricula').classList.remove('hidden');
+    document.getElementById('cuadricula-nota').textContent =
+      `Acumulado de ${d.corridas} verificación(es). Cada celda es una materia en un curso.`;
+
+    document.getElementById('cuadricula-head').innerHTML =
+      '<tr><th class="text-left pr-md pb-sm sticky left-0 bg-surface-container"></th>' +
+      d.cursos.map(c => `<th class="px-xs pb-sm text-on-surface-variant font-medium">${c}</th>`).join('') +
+      '</tr>';
+
+    document.getElementById('cuadricula-body').innerHTML = d.filas.map(f => {
+      const celdas = f.celdas.map(c => {
+        if (!c) return '<td class="p-[2px]"><div class="w-5 h-5 rounded bg-surface-container-high/40"></div></td>';
+        const color = c.pct >= 100 ? 'bg-tertiary' : (c.pct > 0 ? 'bg-primary' : 'bg-error');
+        const tip = `${f.materia} — ${c.curso}: ${c.faltas} de ${c.total} sin planear`;
+        return `<td class="p-[2px]"><div class="w-5 h-5 rounded ${color}" title="${tip}"></div></td>`;
+      }).join('');
+      return `<tr><td class="pr-md py-[2px] text-on-surface whitespace-nowrap sticky left-0 bg-surface-container">${f.materia}</td>${celdas}</tr>`;
     }).join('');
-  } catch (e) { console.error('historial', e); }
+
+    // Pendientes
+    if (d.pendientes && d.pendientes.length) {
+      document.getElementById('seccion-pendientes').classList.remove('hidden');
+      document.getElementById('lista-pendientes').innerHTML = d.pendientes.map(p => `
+        <div class="px-md py-sm rounded-xl bg-surface flex justify-between items-start gap-md">
+          <div>
+            <div class="text-sm text-on-surface">${p.materia} — ${p.curso}</div>
+            <div class="text-[11px] text-on-surface-variant">${p.fechas.join(' · ')}</div>
+          </div>
+          <span class="text-xs text-error whitespace-nowrap">${p.faltas} de ${p.total}</span>
+        </div>`).join('');
+    }
+  } catch (e) { console.error('cuadricula', e); }
 }
 
 async function cargarArchivados() {
@@ -456,7 +487,7 @@ async function abrirReporte(archivo) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  cargarHistorial();
+  cargarCuadricula();
   cargarArchivados();
 });
 

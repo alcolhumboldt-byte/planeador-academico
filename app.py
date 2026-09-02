@@ -2454,6 +2454,61 @@ def _historial_materias(limite=12):
     return {"corridas": corridas, "materias": salida}
 
 
+def _cuadricula(limite=12):
+    """Arma una cuadricula materias x cursos con el estado acumulado, mas la
+    lista de pendientes ordenada por gravedad. Cada celda corresponde a una
+    combinacion materia+curso, que es lo que identifica a un docente."""
+    archivos = [a for a in sorted(os.listdir(CARPETA_REPORTES))
+                if a.endswith(".json")] if os.path.isdir(CARPETA_REPORTES) else []
+    archivos = archivos[-limite:]
+
+    celdas, cursos, materias = {}, set(), set()
+    for arch in archivos:
+        try:
+            with open(os.path.join(CARPETA_REPORTES, arch), encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            continue
+        etiqueta = "%s (P%s B%s)" % (d.get("fecha", "")[:10],
+                                     d.get("periodo", "?"), d.get("bloque", "?"))
+        for mat, datos in (d.get("por_materia") or {}).items():
+            materias.add(mat)
+            for curso in datos.get("completos", []):
+                cursos.add(curso)
+                c = celdas.setdefault((mat, curso), {"ok": 0, "falta": 0, "fechas": []})
+                c["ok"] += 1
+            for curso in datos.get("faltantes", []):
+                cursos.add(curso)
+                c = celdas.setdefault((mat, curso), {"ok": 0, "falta": 0, "fechas": []})
+                c["falta"] += 1
+                c["fechas"].append(etiqueta)
+
+    cursos_ord   = sorted(cursos)
+    materias_ord = sorted(materias)
+
+    filas, pendientes = [], []
+    for mat in materias_ord:
+        fila = {"materia": mat, "celdas": []}
+        for curso in cursos_ord:
+            c = celdas.get((mat, curso))
+            if not c:
+                fila["celdas"].append(None)
+                continue
+            total = c["ok"] + c["falta"]
+            pct   = round(100 * c["ok"] / total) if total else 0
+            fila["celdas"].append({"curso": curso, "pct": pct,
+                                   "faltas": c["falta"], "total": total})
+            if c["falta"]:
+                pendientes.append({"materia": mat, "curso": curso,
+                                   "faltas": c["falta"], "total": total,
+                                   "pct": pct, "fechas": c["fechas"][-4:]})
+        filas.append(fila)
+
+    pendientes.sort(key=lambda x: (-x["faltas"], x["pct"]))
+    return {"cursos": cursos_ord, "filas": filas,
+            "pendientes": pendientes, "corridas": len(archivos)}
+
+
 def _login_automatico(driver, nombre, log):
     """Hace login automático en la plataforma del colegio."""
     perfiles = cargar_perfiles()
@@ -3062,6 +3117,15 @@ def coordinador_historial():
     if not cargar_perfiles().get(nombre, {}).get("es_coordinador", False):
         return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
     return jsonify({"ok": True, **_historial_materias()})
+
+
+@app.route("/api/coordinador/cuadricula")
+def coordinador_cuadricula():
+    nombre = usuario_actual()
+    if not nombre: return jsonify({"ok": False})
+    if not cargar_perfiles().get(nombre, {}).get("es_coordinador", False):
+        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
+    return jsonify({"ok": True, **_cuadricula()})
 
 
 # ─────────────────────────────────────────────
