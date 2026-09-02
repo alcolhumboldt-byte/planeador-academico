@@ -2378,6 +2378,82 @@ def agente_ejecutar():
     return jsonify({"ok": True, "session_id": session_id})
 
 
+CARPETA_REPORTES = os.path.join(CARPETA_DATOS, "reportes")
+
+
+def _guardar_reporte(reporte, autor=""):
+    """Archiva el reporte en /data/reportes para que sobreviva a los redeploy."""
+    os.makedirs(CARPETA_REPORTES, exist_ok=True)
+    ahora  = datetime.now()
+    nombre = "%s_P%s_B%s.json" % (
+        ahora.strftime("%Y-%m-%d_%H%M"),
+        reporte.get("periodo", "?"),
+        reporte.get("bloque", "?"))
+    datos = dict(reporte)
+    datos["fecha"] = ahora.strftime("%Y-%m-%d %H:%M")
+    datos["autor"] = autor
+    with open(os.path.join(CARPETA_REPORTES, nombre), "w", encoding="utf-8") as f:
+        json.dump(datos, f, ensure_ascii=False)
+    return nombre
+
+
+def _listar_reportes():
+    """Devuelve los reportes archivados, del mas reciente al mas antiguo."""
+    if not os.path.isdir(CARPETA_REPORTES):
+        return []
+    salida = []
+    for arch in sorted(os.listdir(CARPETA_REPORTES), reverse=True):
+        if not arch.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(CARPETA_REPORTES, arch), encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            continue
+        salida.append({
+            "archivo":   arch,
+            "fecha":     d.get("fecha", ""),
+            "periodo":   d.get("periodo", ""),
+            "bloque":    d.get("bloque", ""),
+            "completos": len(d.get("completos", [])),
+            "faltantes": len(d.get("faltantes", [])),
+        })
+    return salida
+
+
+def _historial_materias(limite=12):
+    """Agrega los reportes archivados por materia: cuantas veces se reviso,
+    cuantas falto, y en que fechas. Sirve para ver quien incumple seguido."""
+    archivos = [a for a in sorted(os.listdir(CARPETA_REPORTES))
+                if a.endswith(".json")] if os.path.isdir(CARPETA_REPORTES) else []
+    archivos = archivos[-limite:]
+    materias, corridas = {}, []
+    for arch in archivos:
+        try:
+            with open(os.path.join(CARPETA_REPORTES, arch), encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            continue
+        etiqueta = "%s (P%s B%s)" % (d.get("fecha", "")[:10],
+                                     d.get("periodo", "?"), d.get("bloque", "?"))
+        corridas.append(etiqueta)
+        for mat, datos in (d.get("por_materia") or {}).items():
+            m = materias.setdefault(mat, {"revisadas": 0, "faltas": 0, "fechas": []})
+            n_f = len(datos.get("faltantes", []))
+            m["revisadas"] += n_f + len(datos.get("completos", []))
+            m["faltas"]    += n_f
+            if n_f:
+                m["fechas"].append(etiqueta)
+    salida = []
+    for mat, m in materias.items():
+        pct = round(100 * (m["revisadas"] - m["faltas"]) / m["revisadas"]) if m["revisadas"] else 0
+        salida.append({"materia": mat, "cumplimiento": pct,
+                       "faltas": m["faltas"], "revisadas": m["revisadas"],
+                       "fechas": m["fechas"][-5:]})
+    salida.sort(key=lambda x: (x["cumplimiento"], -x["faltas"]))
+    return {"corridas": corridas, "materias": salida}
+
+
 def _login_automatico(driver, nombre, log):
     """Hace login automático en la plataforma del colegio."""
     perfiles = cargar_perfiles()
@@ -2923,6 +2999,10 @@ def verificar_planeaciones():
 
             # Guardar reporte y cerrar Chrome (coordinador no mantiene sesión)
             _reporte_sesiones[session_id]["reporte"] = reporte
+            try:
+                _guardar_reporte(reporte, nombre)
+            except Exception as ex:
+                log("warn", f"No se pudo archivar el reporte: {str(ex)[:50]}")
             try: driver.quit()
             except: pass
 
@@ -2950,6 +3030,39 @@ def coordinador_progreso(session_id):
         "logs":    datos.get("logs", []),
         "reporte": datos.get("reporte"),
     })
+
+@app.route("/api/coordinador/reportes")
+def coordinador_reportes():
+    nombre = usuario_actual()
+    if not nombre: return jsonify({"ok": False})
+    if not cargar_perfiles().get(nombre, {}).get("es_coordinador", False):
+        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
+    return jsonify({"ok": True, "reportes": _listar_reportes()})
+
+
+@app.route("/api/coordinador/reporte/<archivo>")
+def coordinador_reporte(archivo):
+    nombre = usuario_actual()
+    if not nombre: return jsonify({"ok": False})
+    if not cargar_perfiles().get(nombre, {}).get("es_coordinador", False):
+        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
+    # Solo el nombre de archivo, nunca rutas
+    archivo = os.path.basename(re.sub(r"[^0-9A-Za-z_\-\.]", "", archivo))
+    ruta = os.path.join(CARPETA_REPORTES, archivo)
+    if not archivo.endswith(".json") or not os.path.isfile(ruta):
+        return jsonify({"ok": False, "error": "Reporte no encontrado"})
+    with open(ruta, encoding="utf-8") as f:
+        return jsonify({"ok": True, "reporte": json.load(f)})
+
+
+@app.route("/api/coordinador/historial")
+def coordinador_historial():
+    nombre = usuario_actual()
+    if not nombre: return jsonify({"ok": False})
+    if not cargar_perfiles().get(nombre, {}).get("es_coordinador", False):
+        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
+    return jsonify({"ok": True, **_historial_materias()})
+
 
 # ─────────────────────────────────────────────
 # APAGADO DE EMERGENCIA

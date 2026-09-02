@@ -129,9 +129,29 @@
           <div id="lista-completos" class="space-y-md"></div>
         </div>
 
+        <!-- Historial -->
+        <div id="seccion-historial" class="hidden bg-surface-container rounded-3xl p-xl border border-outline-variant/20 shadow-sm">
+          <h3 class="text-base font-medium text-on-surface mb-xs flex items-center gap-sm">
+            <span class="material-symbols-outlined text-primary">monitoring</span>
+            Cumplimiento por materia
+          </h3>
+          <p class="text-xs text-on-surface-variant mb-lg">
+            Acumulado de las verificaciones guardadas. Las materias con menor cumplimiento aparecen primero.
+          </p>
+          <div id="barras-historial" class="space-y-sm"></div>
+        </div>
+
+        <!-- Reportes guardados -->
+        <div id="seccion-archivados" class="hidden bg-surface-container rounded-3xl p-xl border border-outline-variant/20 shadow-sm">
+          <h3 class="text-base font-medium text-on-surface mb-lg flex items-center gap-sm">
+            <span class="material-symbols-outlined text-primary">history</span>
+            Verificaciones anteriores
+          </h3>
+          <div id="lista-archivados" class="space-y-xs"></div>
+        </div>
+
         <!-- Acciones -->
-        <div class="flex gap-sm">
-          <button onclick="exportarReporte()"
+        <div class="flex gap-sm">          <button onclick="exportarReporte()"
             class="flex-1 border border-outline text-on-surface py-md rounded-full text-sm hover:bg-surface-container-high transition-colors flex items-center justify-center gap-xs">
             <span class="material-symbols-outlined text-[18px]">download</span>
             Exportar .txt
@@ -376,5 +396,69 @@ function nuevaVerificacion() {
   document.getElementById('informe-ia').innerHTML = 'Presiona "Generar informe" para que la IA analice los resultados y redacte un resumen ejecutivo.';
   reporteActual = null;
 }
+
+// ── Historial y reportes guardados ──────────────
+async function cargarHistorial() {
+  try {
+    const r = await fetch('/api/coordinador/historial');
+    const d = await r.json();
+    if (!d.ok || !d.materias || !d.materias.length) return;
+
+    document.getElementById('seccion-historial').classList.remove('hidden');
+    const cont = document.getElementById('barras-historial');
+    cont.innerHTML = d.materias.map(m => {
+      const color = m.cumplimiento >= 80 ? 'bg-tertiary'
+                  : m.cumplimiento >= 50 ? 'bg-primary' : 'bg-error';
+      const detalle = m.fechas.length
+        ? 'Faltó en: ' + m.fechas.join(' · ')
+        : 'Sin faltas registradas';
+      return `
+        <div>
+          <div class="flex justify-between items-baseline mb-xs">
+            <span class="text-sm text-on-surface">${m.materia}</span>
+            <span class="text-xs text-on-surface-variant">${m.cumplimiento}% · ${m.faltas} de ${m.revisadas} sin planear</span>
+          </div>
+          <div class="h-2 w-full bg-surface-container-high rounded-full overflow-hidden">
+            <div class="${color} h-2 rounded-full" style="width:${m.cumplimiento}%"></div>
+          </div>
+          <div class="text-[11px] text-on-surface-variant mt-xs">${detalle}</div>
+        </div>`;
+    }).join('');
+  } catch (e) { console.error('historial', e); }
+}
+
+async function cargarArchivados() {
+  try {
+    const r = await fetch('/api/coordinador/reportes');
+    const d = await r.json();
+    if (!d.ok || !d.reportes || !d.reportes.length) return;
+
+    document.getElementById('seccion-archivados').classList.remove('hidden');
+    const cont = document.getElementById('lista-archivados');
+    cont.innerHTML = d.reportes.map(x => `
+      <button onclick="abrirReporte('${x.archivo}')"
+        class="w-full text-left px-md py-sm rounded-xl hover:bg-surface-container-high transition-colors flex justify-between items-center">
+        <span class="text-sm text-on-surface">${x.fecha} — Periodo ${x.periodo}, Bloque ${x.bloque}</span>
+        <span class="text-xs text-on-surface-variant">${x.faltantes} sin planear de ${x.completos + x.faltantes}</span>
+      </button>`).join('');
+  } catch (e) { console.error('archivados', e); }
+}
+
+async function abrirReporte(archivo) {
+  try {
+    const r = await fetch('/api/coordinador/reporte/' + encodeURIComponent(archivo));
+    const d = await r.json();
+    if (d.ok && d.reporte) {
+      mostrarReporte(d.reporte);
+      window.scrollTo({top: 0, behavior: 'smooth'});
+    }
+  } catch (e) { console.error('abrir', e); }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  cargarHistorial();
+  cargarArchivados();
+});
+
 </script>
 {% endblock %}
