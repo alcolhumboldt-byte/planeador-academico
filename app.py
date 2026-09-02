@@ -467,6 +467,10 @@ def login():
 
     session.permanent = True
     session["usuario"] = nombre
+    # El menu lateral consulta session['es_coordinador'] en todas las paginas.
+    # Sin esto el enlace de Coordinador solo aparecia en las dos vistas que
+    # pasaban la variable por su cuenta.
+    session["es_coordinador"] = cargar_perfiles().get(nombre, {}).get("es_coordinador", False)
     log_auditoria("LOGIN_OK", nombre)
     return jsonify({"ok": True})
 
@@ -505,6 +509,7 @@ def registro():
     }
     guardar_perfiles(perfiles)
     session["usuario"] = nombre
+    session["es_coordinador"] = perfiles[nombre]["es_coordinador"]
     return jsonify({"ok": True})
 
 @app.route("/api/admin/debug_api_key")
