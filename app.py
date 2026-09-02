@@ -2369,47 +2369,6 @@ def agente_ejecutar():
     return jsonify({"ok": True, "session_id": session_id})
 
 
-def _preparar_selects(driver, timeout=20):
-    """En Plan_Aula los selects de asignatura y periodo NO existen al cargar:
-    se llaman select1/select2 y no tienen id. Solo cuando se elige un curso,
-    la funcion colocarsemper() de la plataforma los reconstruye como
-    ASIGNATURA y PERIODO. Sin esto el bot espera elementos inexistentes."""
-    try:
-        driver.execute_script(
-            "if (typeof colocarsemper === 'function') { colocarsemper(); }")
-    except Exception:
-        pass
-    fin = time.time() + timeout
-    while time.time() < fin:
-        try:
-            listo = driver.execute_script(
-                "var a=document.getElementById('ASIGNATURA');"
-                "return !!(a && a.options.length > 1);")
-            if listo:
-                return True
-        except Exception:
-            pass
-        time.sleep(0.5)
-    return False
-
-
-def _fecha_inicio_bloque(driver, bloque):
-    """Devuelve la fecha de inicio (YYYY-MM-DD) del bloque pedido, leyendo
-    la lista de fechas que la plataforma muestra tras listar."""
-    try:
-        texto = driver.find_element(By.TAG_NAME, "body").text
-    except Exception:
-        return None
-    pares = re.findall(r"Fecha Inicio:\s*(\d{4}-\d{2}-\d{2})", texto)
-    # El primero puede ser el "Fecha Inicio de Periodo", que no es un bloque
-    if len(pares) > 1 and "Fecha Inicio de Periodo" in texto:
-        pares = pares[1:]
-    idx = int(bloque)
-    if 0 <= idx < len(pares):
-        return pares[idx]
-    return None
-
-
 def _login_automatico(driver, nombre, log):
     """Hace login automático en la plataforma del colegio."""
     perfiles = cargar_perfiles()
@@ -2867,28 +2826,52 @@ def verificar_planeaciones():
                             except Exception:
                                 pass
 
-                            # Leer la tabla de planeaciones
+                            # Leer la tabla en UNA sola llamada al navegador.
+                            # Antes se recorrian las filas una por una (unos 100
+                            # viajes por materia) y se usaba body.text, que en
+                            # headless puede colgarse sin lanzar excepcion.
                             log("info", f"  · {asig['nombre']}: leyendo tabla...")
-                            filas = driver.find_elements(By.CSS_SELECTOR, "table tr")
-                            filas_datos = [
-                                f for f in filas
-                                if len(f.find_elements(By.TAG_NAME, "td")) >= 4
-                            ]
+                            try:
+                                datos = driver.execute_script("""
+                                    var out = {fechas: [], filas: []};
+                                    var tablas = document.querySelectorAll('table');
+                                    var t = null;
+                                    for (var i = 0; i < tablas.length; i++) {
+                                        if (tablas[i].textContent.indexOf('PLANES DE AULA') !== -1) {
+                                            t = tablas[i];
+                                        }
+                                    }
+                                    if (t) {
+                                        for (var r = 0; r < t.rows.length; r++) {
+                                            var celdas = t.rows[r].cells;
+                                            if (celdas.length < 6) continue;
+                                            out.filas.push([
+                                                (celdas[3].textContent || '').trim(),
+                                                (celdas[5].textContent || '').trim()
+                                            ]);
+                                        }
+                                    }
+                                    var txt = document.body.innerText || '';
+                                    var re = /Fecha Inicio:\\s*(\\d{4}-\\d{2}-\\d{2})/g, m;
+                                    while ((m = re.exec(txt)) !== null) { out.fechas.push(m[1]); }
+                                    if (txt.indexOf('Fecha Inicio de Periodo') !== -1 && out.fechas.length > 1) {
+                                        out.fechas.shift();
+                                    }
+                                    return out;
+                                """) or {"fechas": [], "filas": []}
+                            except Exception:
+                                _capturar_debug(driver, f"coord_tabla_{curso['codigo']}")
+                                log("warn", f"  {asig['nombre']}: no se pudo leer la tabla")
+                                continue
 
-                            # Verificar si hay planeacion para ESTE bloque.
-                            # Columnas reales de la tabla:
-                            # 0=No 1=Per 2=Fecha Registro 3=Fecha Inicio
-                            # 4=Fecha Final 5=Informacion 6=Accion
-                            # Antes se leia celdas[4] (Fecha Final), que siempre
-                            # tiene contenido: por eso todo salia en verde.
-                            fecha_bloque = _fecha_inicio_bloque(driver, bloque)
+                            # Columnas reales: 0=No 1=Per 2=Fecha Registro
+                            # 3=Fecha Inicio 4=Fecha Final 5=Informacion 6=Accion
+                            fechas = datos.get("fechas") or []
+                            idx = int(bloque)
+                            fecha_bloque = fechas[idx] if 0 <= idx < len(fechas) else None
+
                             tiene_planeacion = False
-                            for fila in filas_datos:
-                                celdas = fila.find_elements(By.TAG_NAME, "td")
-                                if len(celdas) < 6:
-                                    continue
-                                fecha_ini = celdas[3].text.strip()
-                                info      = celdas[5].text.strip()
+                            for fecha_ini, info in datos.get("filas") or []:
                                 if not info:
                                     continue
                                 if fecha_bloque:
@@ -2896,8 +2879,6 @@ def verificar_planeaciones():
                                         tiene_planeacion = True
                                         break
                                 else:
-                                    # Sin fechas legibles no se puede afinar por
-                                    # bloque: se reporta como antes, pero avisando
                                     tiene_planeacion = True
                                     break
 
