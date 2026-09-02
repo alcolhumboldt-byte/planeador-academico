@@ -606,6 +606,10 @@ def dashboard():
     mats     = get_materias(perfiles, nombre)
     año      = get_año(perfiles, nombre)
     es_coord = cargar_perfiles().get(nombre, {}).get("es_coordinador", False)
+    # El dashboard muestra materias y planeaciones propias: no aplica a
+    # coordinacion, que solo usa el reporte de verificacion.
+    if es_coord:
+        return redirect(url_for("coordinador"))
     return render_template("dashboard.html",
         nombre=nombre, año=año, es_coordinador=es_coord, materias=mats,
         num_materias=len(mats),

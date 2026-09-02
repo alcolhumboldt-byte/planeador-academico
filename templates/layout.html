@@ -26,6 +26,7 @@
       <span style="font-size:12.5px;font-weight:500;{% if pagina_actual == 'dashboard' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.45);{% endif %}">Dashboard</span>
     </a>
 
+    {% if not session.get('es_coordinador') %}
     <a href="/planear" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:1px;text-decoration:none;transition:all 0.15s;
       {% if pagina_actual == 'planear' %}background:rgba(59,107,245,0.18);{% endif %}">
       <span class="material-symbols-outlined" style="font-size:18px;{% if pagina_actual == 'planear' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.35);{% endif %}">event_note</span>
@@ -57,6 +58,8 @@
       <span class="material-symbols-outlined" style="font-size:18px;{% if pagina_actual == 'materias' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.35);{% endif %}">auto_stories</span>
       <span style="font-size:12.5px;font-weight:500;{% if pagina_actual == 'materias' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.45);{% endif %}">Materias</span>
     </a>
+
+    {% endif %}
 
     {% if session.get('es_coordinador') %}
     <a href="/coordinador" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:1px;text-decoration:none;transition:all 0.15s;
