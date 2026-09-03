@@ -438,7 +438,34 @@ def set_periodo_semanas(perfiles, nombre, num_periodo, semanas):
     return perfiles
 
 def usuario_actual():
-    return session.get("usuario")
+    """Devuelve el usuario en sesion, o None si no hay o si fue bloqueado."""
+    nombre = session.get("usuario")
+    if not nombre:
+        return None
+    perfil = cargar_perfiles().get(nombre)
+    if perfil is None:
+        session.clear()
+        return None
+    if perfil.get("bloqueado", False):
+        # Un perfil bloqueado pierde la sesion de inmediato
+        session.clear()
+        return None
+    return nombre
+
+
+def es_admin(nombre):
+    return bool(cargar_perfiles().get(nombre, {}).get("es_admin", False))
+
+
+def puede_planear(nombre):
+    """Por defecto todos pueden planear; el admin lo puede revocar."""
+    return cargar_perfiles().get(nombre, {}).get("puede_planear", True)
+
+
+def exigir_admin():
+    """Devuelve el nombre si es admin, o None. Para usar en las rutas."""
+    nombre = usuario_actual()
+    return nombre if nombre and es_admin(nombre) else None
 
 # ─────────────────────────────────────────────
 # RUTAS — AUTENTICACIÓN
@@ -470,7 +497,9 @@ def login():
     # El menu lateral consulta session['es_coordinador'] en todas las paginas.
     # Sin esto el enlace de Coordinador solo aparecia en las dos vistas que
     # pasaban la variable por su cuenta.
-    session["es_coordinador"] = cargar_perfiles().get(nombre, {}).get("es_coordinador", False)
+    _p = cargar_perfiles().get(nombre, {})
+    session["es_coordinador"] = _p.get("es_coordinador", False)
+    session["es_admin"]       = _p.get("es_admin", False)
     log_auditoria("LOGIN_OK", nombre)
     return jsonify({"ok": True})
 
@@ -510,6 +539,7 @@ def registro():
     guardar_perfiles(perfiles)
     session["usuario"] = nombre
     session["es_coordinador"] = perfiles[nombre]["es_coordinador"]
+    session["es_admin"]       = False
     return jsonify({"ok": True})
 
 @app.route("/api/admin/debug_api_key")
@@ -639,6 +669,7 @@ def api_dashboard():
 def materias():
     nombre = usuario_actual()
     if not nombre: return redirect(url_for("index"))
+    if not puede_planear(nombre): return redirect(url_for("dashboard"))
     perfiles = cargar_perfiles()
     mats     = get_materias(perfiles, nombre)
     año      = get_año(perfiles, nombre)
@@ -712,6 +743,7 @@ def editar_recursos():
 def periodos():
     nombre = usuario_actual()
     if not nombre: return redirect(url_for("index"))
+    if not puede_planear(nombre): return redirect(url_for("dashboard"))
     perfiles = cargar_perfiles()
     mats     = get_materias(perfiles, nombre)
     año      = get_año(perfiles, nombre)
@@ -789,6 +821,7 @@ def obtener_periodos():
 def asistente():
     nombre = usuario_actual()
     if not nombre: return redirect(url_for("index"))
+    if not puede_planear(nombre): return redirect(url_for("dashboard"))
     perfiles = cargar_perfiles()
     mats     = get_materias(perfiles, nombre)
     año      = get_año(perfiles, nombre)
@@ -1008,6 +1041,7 @@ Máximo 3 líneas. Usa el nombre {nc}. Tono de colega."""
 def planear():
     nombre = usuario_actual()
     if not nombre: return redirect(url_for("index"))
+    if not puede_planear(nombre): return redirect(url_for("dashboard"))
     perfiles = cargar_perfiles()
     mats     = get_materias(perfiles, nombre)
     año      = get_año(perfiles, nombre)
@@ -2110,6 +2144,7 @@ _agente_sesiones = {}  # session_id -> logs
 def agente():
     nombre = usuario_actual()
     if not nombre: return redirect(url_for("index"))
+    if not puede_planear(nombre): return redirect(url_for("dashboard"))
     perfiles = cargar_perfiles()
     mats     = get_materias(perfiles, nombre)
     año      = get_año(perfiles, nombre)
@@ -2709,6 +2744,80 @@ def agente_progreso(session_id):
 # ─────────────────────────────────────────────
 
 _reporte_sesiones = {}  # session_id -> {logs, reporte}
+
+
+@app.route("/admin/perfiles")
+def admin_perfiles_vista():
+    nombre = exigir_admin()
+    if not nombre:
+        return redirect(url_for("dashboard"))
+    return render_template("admin.html", nombre=nombre,
+                           año=get_año(cargar_perfiles(), nombre),
+                           es_coordinador=True, es_admin=True)
+
+
+@app.route("/api/admin/perfiles")
+def admin_listar_perfiles():
+    nombre = exigir_admin()
+    if not nombre:
+        return jsonify({"ok": False, "error": "Solo administradores"})
+    salida = []
+    for n, p in cargar_perfiles().items():
+        salida.append({
+            "nombre": n,
+            "es_admin": bool(p.get("es_admin", False)),
+            "es_coordinador": bool(p.get("es_coordinador", False)),
+            "puede_planear": p.get("puede_planear", True),
+            "bloqueado": bool(p.get("bloqueado", False)),
+            "materias": len((p.get("años", {}).get(AÑO_ACTUAL, {}) or {}).get("materias", {})),
+        })
+    salida.sort(key=lambda x: x["nombre"].lower())
+    return jsonify({"ok": True, "perfiles": salida, "yo": nombre})
+
+
+@app.route("/api/admin/perfil/<usuario>", methods=["POST"])
+def admin_cambiar_perfil(usuario):
+    nombre = exigir_admin()
+    if not nombre:
+        return jsonify({"ok": False, "error": "Solo administradores"})
+
+    perfiles = cargar_perfiles()
+    usuario = sanitize(usuario, "nombre")
+    if usuario not in perfiles:
+        return jsonify({"ok": False, "error": "Perfil no encontrado"})
+
+    data  = request.get_json(silent=True) or {}
+    campo = data.get("campo")
+    valor = bool(data.get("valor"))
+
+    if campo not in ("es_coordinador", "puede_planear", "bloqueado", "es_admin"):
+        return jsonify({"ok": False, "error": "Campo no permitido"})
+
+    # No dejar que un admin se quite a si mismo el acceso y pierda el panel
+    if usuario == nombre and campo in ("bloqueado", "es_admin"):
+        return jsonify({"ok": False,
+                        "error": "No puedes cambiar eso en tu propio perfil"})
+
+    perfiles[usuario][campo] = valor
+    guardar_perfiles(perfiles)
+    log_auditoria("ADMIN_PERFIL", nombre, f"{usuario}.{campo}={valor}")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/admin/promover")
+def admin_promover():
+    """Crea el primer administrador usando la ADMIN_KEY del servidor."""
+    clave_admin = os.environ.get("ADMIN_KEY", "")
+    if not clave_admin or request.args.get("clave", "") != clave_admin:
+        return jsonify({"ok": False, "error": "Clave inválida"})
+    usuario = sanitize(request.args.get("usuario", ""), "nombre")
+    perfiles = cargar_perfiles()
+    if usuario not in perfiles:
+        return jsonify({"ok": False, "error": "Perfil no encontrado"})
+    perfiles[usuario]["es_admin"] = True
+    guardar_perfiles(perfiles)
+    log_auditoria("ADMIN_PROMOVER", usuario, "via ADMIN_KEY")
+    return jsonify({"ok": True, "mensaje": f"{usuario} ahora es administrador"})
 
 
 @app.route("/coordinador/historial")

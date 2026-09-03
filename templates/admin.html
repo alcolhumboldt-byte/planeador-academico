@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Perfiles{% endblock %}
+
+{% block body %}
+<div class="flex min-h-screen bg-surface">
+  {% include "layout.html" %}
+
+  <main class="flex-1 flex flex-col">
+    <header class="sticky top-0 z-40 bg-surface/80 backdrop-blur-md flex items-center h-16 px-lg w-full border-b border-outline-variant/20">
+      <div class="flex items-center gap-sm">
+        <span class="material-symbols-outlined text-primary">manage_accounts</span>
+        <h1 class="text-lg font-medium text-on-surface">Perfiles</h1>
+      </div>
+    </header>
+
+    <section class="p-lg md:p-xl flex-1 max-w-4xl mx-auto w-full pb-20 md:pb-xl">
+
+      <div class="mb-xl">
+        <p class="text-sm text-on-surface-variant">
+          Controla quién puede planear, quién entra a coordinación y quién queda sin acceso.
+        </p>
+      </div>
+
+      <div id="lista-perfiles" class="space-y-sm"></div>
+
+      <p class="text-xs text-on-surface-variant mt-xl leading-relaxed">
+        Bloquear cierra la sesión de esa persona de inmediato y le impide volver a entrar.
+        Quitar «Puede planear» deja el perfil activo pero sin acceso a planeación ni al agente.
+      </p>
+
+    </section>
+  </main>
+</div>
+
+<script>
+let yo = '';
+
+async function cargarPerfiles() {
+  try {
+    const r = await fetch('/api/admin/perfiles');
+    const d = await r.json();
+    if (!d.ok) {
+      document.getElementById('lista-perfiles').innerHTML =
+        `<div class="text-error text-sm">${d.error || 'Sin acceso'}</div>`;
+      return;
+    }
+    yo = d.yo;
+    document.getElementById('lista-perfiles').innerHTML = d.perfiles.map(p => {
+      const esYo = p.nombre === yo;
+      const etiquetas = [];
+      if (p.es_admin)       etiquetas.push('<span class="text-primary">admin</span>');
+      if (p.es_coordinador) etiquetas.push('<span class="text-tertiary">coordinación</span>');
+      if (p.bloqueado)      etiquetas.push('<span class="text-error">bloqueado</span>');
+      return `
+        <div class="bg-surface-container rounded-2xl p-lg border border-outline-variant/20">
+          <div class="flex justify-between items-baseline mb-md gap-md">
+            <div>
+              <span class="text-sm text-on-surface">${p.nombre}</span>
+              ${esYo ? '<span class="text-xs text-on-surface-variant"> · tú</span>' : ''}
+              <div class="text-xs text-on-surface-variant">${etiquetas.join(' · ') || 'profesor'} · ${p.materias} materias</div>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-sm">
+            ${chip(p.nombre, 'es_coordinador', p.es_coordinador, 'Coordinación')}
+            ${chip(p.nombre, 'puede_planear',  p.puede_planear,  'Puede planear')}
+            ${esYo ? '' : chip(p.nombre, 'bloqueado', p.bloqueado, 'Bloqueado', true)}
+          </div>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function chip(usuario, campo, activo, texto, peligro) {
+  const base = 'text-xs px-md py-xs rounded-full border transition-colors cursor-pointer';
+  const on   = peligro
+    ? 'bg-error/15 border-error/40 text-error'
+    : 'bg-primary/15 border-primary/40 text-primary';
+  const off  = 'border-outline-variant/40 text-on-surface-variant';
+  return `<button class="${base} ${activo ? on : off}"
+    onclick="cambiar('${usuario}','${campo}',${!activo})">${texto}</button>`;
+}
+
+async function cambiar(usuario, campo, valor) {
+  try {
+    const r = await fetch('/api/admin/perfil/' + encodeURIComponent(usuario), {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({campo, valor})
+    });
+    const d = await r.json();
+    if (!d.ok) { alert(d.error || 'No se pudo cambiar'); return; }
+    cargarPerfiles();
+  } catch (e) { alert('Error de conexión'); }
+}
+
+document.addEventListener('DOMContentLoaded', cargarPerfiles);
+</script>
+{% endblock %}

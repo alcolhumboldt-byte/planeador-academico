@@ -73,6 +73,13 @@
       <span style="font-size:12.5px;font-weight:500;{% if pagina_actual == 'historial' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.45);{% endif %}">Historial Planeador</span>
     </a>
     {% endif %}
+    {% if session.get('es_admin') %}
+    <a href="/admin/perfiles" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:1px;text-decoration:none;transition:all 0.15s;
+      {% if pagina_actual == 'admin' %}background:rgba(59,107,245,0.18);{% endif %}">
+      <span class="material-symbols-outlined" style="font-size:18px;{% if pagina_actual == 'admin' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.35);{% endif %}">manage_accounts</span>
+      <span style="font-size:12.5px;font-weight:500;{% if pagina_actual == 'admin' %}color:#6C8FFF;{% else %}color:rgba(255,255,255,0.45);{% endif %}">Perfiles</span>
+    </a>
+    {% endif %}
   </nav>
 
   <!-- Bottom -->
