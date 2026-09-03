@@ -38,13 +38,13 @@
 
           <!-- Evolucion -->
           <div id="bloque-evolucion" class="mb-xl hidden">
-            <div class="text-sm text-on-surface mb-sm">Cumplimiento por verificación</div>
+            <div class="text-sm text-on-surface mb-sm">Materias completas por verificación</div>
             <div id="grafica-evolucion" class="flex items-end gap-xs h-28"></div>
             <div id="etiquetas-evolucion" class="flex gap-xs mt-xs"></div>
           </div>
 
           <!-- Ranking -->
-          <div class="text-sm text-on-surface mb-sm">Planeaciones por docente</div>
+          <div class="text-sm text-on-surface mb-sm">Materias por docente</div>
           <div id="ranking-docentes" class="space-y-sm"></div>
         </div>
 
@@ -111,28 +111,31 @@ async function cargarHistorial() {
         `<div class="flex-1 text-center text-[10px] text-on-surface-variant">${e.etiqueta}</div>`).join('');
     } else { eb.classList.add('hidden'); }
 
-    // Ranking
+    // Ranking (unidad = materia, no curso suelto)
     const max = Math.max(...d.ranking.map(x => x.total), 1);
     document.getElementById('ranking-docentes').innerHTML = d.ranking.map((x, i) => {
-      const anchoOk  = (x.hechas / max) * 100;
-      const anchoFal = (x.faltantes / max) * 100;
-      const estado = x.faltantes
-        ? `<span class="text-error">${x.faltantes} sin planear</span>`
-        : `<span class="text-tertiary">al día</span>`;
+      const aOk  = (x.hechas    / max) * 100;
+      const aPar = (x.parciales / max) * 100;
+      const aFal = (x.faltantes / max) * 100;
+      const partes = [];
+      if (x.hechas)    partes.push(`<span class="text-tertiary">${x.hechas} al día</span>`);
+      if (x.parciales) partes.push(`<span class="text-primary">${x.parciales} parcial</span>`);
+      if (x.faltantes) partes.push(`<span class="text-error">${x.faltantes} sin planear</span>`);
       const detalle = x.detalle.length
-        ? x.detalle.map(f => `${f.item} (${f.bloque})`).join(' · ')
-        : '';
+        ? x.detalle.map(f => `${f.item} (${f.bloque})`).join('<br>')
+        : 'Sin pendientes registrados';
       return `
         <div class="cursor-pointer" onclick="const e=document.getElementById('det-${i}'); e.classList.toggle('hidden');">
-          <div class="flex justify-between items-baseline mb-xs">
+          <div class="flex justify-between items-baseline mb-xs gap-md">
             <span class="text-sm text-on-surface">${x.docente}</span>
-            <span class="text-xs text-on-surface-variant">${x.hechas} hechas · ${estado}</span>
+            <span class="text-xs text-on-surface-variant text-right">${partes.join(' · ')}</span>
           </div>
           <div class="flex h-2 w-full bg-surface-container-high rounded-full overflow-hidden">
-            <div class="bg-tertiary h-2" style="width:${anchoOk}%"></div>
-            <div class="bg-error h-2" style="width:${anchoFal}%"></div>
+            <div class="bg-tertiary h-2" style="width:${aOk}%"></div>
+            <div class="bg-primary h-2" style="width:${aPar}%"></div>
+            <div class="bg-error h-2" style="width:${aFal}%"></div>
           </div>
-          <div id="det-${i}" class="hidden text-[11px] text-on-surface-variant mt-xs">${detalle || 'Sin pendientes registrados'}</div>
+          <div id="det-${i}" class="hidden text-[11px] text-on-surface-variant mt-xs leading-relaxed">${detalle}</div>
         </div>`;
     }).join('');
   } catch (e) { console.error('historial', e); }

@@ -2445,44 +2445,73 @@ def _reportes_unicos(periodo=None):
     return sorted(porclave.values(), key=lambda x: x.get("fecha", ""))
 
 
+def _agrupar_por_materia(reporte):
+    """Agrupa las combinaciones docente+curso+materia en una unidad por
+    docente+materia. Un docente que dicta la misma asignatura en varios
+    cursos cuenta como UNA planeacion, con su avance parcial (2 de 3)."""
+    grupos = {}
+    for item in (reporte.get("completos") or []):
+        clave = (item.get("docente", ""), item.get("materia", ""))
+        g = grupos.setdefault(clave, {"hechas": 0, "total": 0, "faltan": []})
+        g["hechas"] += 1
+        g["total"]  += 1
+    for item in (reporte.get("faltantes") or []):
+        clave = (item.get("docente", ""), item.get("materia", ""))
+        g = grupos.setdefault(clave, {"hechas": 0, "total": 0, "faltan": []})
+        g["total"] += 1
+        g["faltan"].append(item.get("curso", ""))
+    return grupos
+
+
 def _historial(periodo=None):
-    """Arma el ranking por docente y la evolucion del cumplimiento."""
+    """Ranking por docente contando MATERIAS (no cursos sueltos) y evolucion."""
     reportes = _reportes_unicos(periodo)
 
     docentes, evolucion = {}, []
     for d in reportes:
-        ok_total = len(d.get("completos") or [])
-        fal_total = len(d.get("faltantes") or [])
-        tot = ok_total + fal_total
+        grupos = _agrupar_por_materia(d)
+        etiqueta = "P%s B%s" % (d.get("periodo", "?"), d.get("bloque", "?"))
+
+        completas = sum(1 for g in grupos.values() if g["hechas"] == g["total"])
         evolucion.append({
-            "etiqueta": "P%s B%s" % (d.get("periodo", "?"), d.get("bloque", "?")),
+            "etiqueta": etiqueta,
             "fecha": (d.get("fecha") or "")[:10],
-            "pct": round(100 * ok_total / tot) if tot else 0,
-            "faltantes": fal_total,
+            "pct": round(100 * completas / len(grupos)) if grupos else 0,
+            "faltantes": len(grupos) - completas,
         })
-        for doc, datos in (d.get("por_docente") or {}).items():
-            m = docentes.setdefault(doc, {"hechas": 0, "faltantes": 0, "detalle": []})
-            m["hechas"] += len(datos.get("completos") or [])
-            for item in (datos.get("faltantes") or []):
+
+        for (doc, materia), g in grupos.items():
+            m = docentes.setdefault(doc, {"completas": 0, "parciales": 0,
+                                          "faltantes": 0, "detalle": []})
+            if g["hechas"] == g["total"]:
+                m["completas"] += 1
+            elif g["hechas"] == 0:
                 m["faltantes"] += 1
                 m["detalle"].append({
-                    "item": item,
-                    "bloque": "P%s B%s" % (d.get("periodo", "?"), d.get("bloque", "?")),
-                })
+                    "item": "%s — sin planear (%s cursos)" % (materia, g["total"]),
+                    "bloque": etiqueta})
+            else:
+                m["parciales"] += 1
+                m["detalle"].append({
+                    "item": "%s — %s de %s (falta %s)" % (
+                        materia, g["hechas"], g["total"], ", ".join(g["faltan"][:4])),
+                    "bloque": etiqueta})
 
     ranking = []
     for doc, m in docentes.items():
-        total = m["hechas"] + m["faltantes"]
+        total = m["completas"] + m["parciales"] + m["faltantes"]
+        pendientes = m["parciales"] + m["faltantes"]
         ranking.append({
             "docente": doc,
-            "hechas": m["hechas"],
+            "hechas": m["completas"],
+            "parciales": m["parciales"],
             "faltantes": m["faltantes"],
             "total": total,
-            "pct": round(100 * m["hechas"] / total) if total else 0,
+            "pct": round(100 * m["completas"] / total) if total else 0,
             "detalle": m["detalle"][:20],
         })
-    # Pendientes primero (mas faltantes arriba); al dia despues, por nombre
-    ranking.sort(key=lambda x: (x["faltantes"] == 0, -x["faltantes"], x["docente"]))
+    ranking.sort(key=lambda x: (x["faltantes"] + x["parciales"] == 0,
+                                -x["faltantes"], -x["parciales"], x["docente"]))
 
     periodos = sorted({str(d.get("periodo")) for d in _reportes_unicos()} - {"None", ""})
     return {"ranking": ranking, "evolucion": evolucion,
