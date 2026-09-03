@@ -3021,6 +3021,70 @@ def coordinador_reporte(archivo):
         return jsonify({"ok": True, "reporte": json.load(f)})
 
 
+@app.route("/api/coordinador/informe", methods=["POST"])
+@limiter.limit("20 per hour")
+def coordinador_informe():
+    """Genera el informe ejecutivo desde el servidor. Antes el navegador
+    llamaba directo a la API sin key (y sin poder tenerla): no funcionaba."""
+    nombre = usuario_actual()
+    if not nombre: return jsonify({"ok": False})
+    if not cargar_perfiles().get(nombre, {}).get("es_coordinador", False):
+        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
+
+    api_key = get_api_key()
+    if not api_key:
+        return jsonify({"ok": False, "error": "No hay API key configurada en el servidor"})
+
+    reporte = (request.get_json(silent=True) or {}).get("reporte") or {}
+    completos = reporte.get("completos") or []
+    faltantes = reporte.get("faltantes") or []
+
+    lineas = [
+        f"Periodo {reporte.get('periodo','?')}, Bloque {reporte.get('bloque','?')}",
+        f"Total revisados: {len(completos) + len(faltantes)}",
+        f"Con planeación: {len(completos)}",
+        f"Sin planeación: {len(faltantes)}",
+        "",
+        "DETALLE POR DOCENTE:",
+    ]
+    for doc, datos in (reporte.get("por_docente") or {}).items():
+        falt = datos.get("faltantes") or []
+        comp = datos.get("completos") or []
+        lineas.append(f"\n{doc}: {len(comp)} al día, {len(falt)} sin planear")
+        if falt:
+            lineas.append("  Sin planeación: " + ", ".join(falt[:12]))
+    resumen = "\n".join(lineas)[:6000]
+
+    sistema = ("Eres un asistente académico del Colegio Humboldt. Redactas informes "
+               "ejecutivos claros para coordinación académica. Tono directo y "
+               "constructivo, nunca acusatorio. Responde en español.")
+    prompt = ("Con base en este reporte de verificación de planeaciones, redacta un "
+              "informe ejecutivo breve para la coordinación. Incluye: estado general, "
+              "docentes o cursos con mayor incumplimiento, y una recomendación de "
+              "acción.\n\nDATOS:\n" + resumen)
+
+    try:
+        if get_proveedor() == "anthropic":
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            res = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1000, system=sistema,
+                messages=[{"role": "user", "content": prompt}])
+            texto = res.content[0].text.strip()
+        else:
+            import openai
+            client = openai.OpenAI(api_key=api_key)
+            res = client.chat.completions.create(
+                model="gpt-4o-mini", max_tokens=1000,
+                messages=[{"role": "system", "content": sistema},
+                          {"role": "user", "content": prompt}])
+            texto = res.choices[0].message.content.strip()
+        return jsonify({"ok": True, "informe": texto})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:150]})
+
+
 @app.route("/api/coordinador/cuadricula")
 def coordinador_cuadricula():
     nombre = usuario_actual()

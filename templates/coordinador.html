@@ -305,53 +305,22 @@ async function generarInformeIA() {
   const informeDiv = document.getElementById('informe-ia');
   informeDiv.innerHTML = '<span class="text-on-surface-variant">La IA está analizando los datos...</span>';
 
-  const completos  = reporteActual.completos || [];
-  const faltantes  = reporteActual.faltantes || [];
-  const porMateria = reporteActual.por_materia || {};
-
-  // Construir resumen para la IA
-  let resumenDatos = `Periodo ${reporteActual.periodo}, Bloque ${reporteActual.bloque}\n`;
-  resumenDatos += `Total revisados: ${completos.length + faltantes.length}\n`;
-  resumenDatos += `Con planeación: ${completos.length}\n`;
-  resumenDatos += `Sin planeación: ${faltantes.length}\n\n`;
-
-  resumenDatos += `DETALLE POR MATERIA:\n`;
-  Object.entries(porMateria).forEach(([mat, datos]) => {
-    resumenDatos += `\n${mat}:\n`;
-    if (datos.completos.length) resumenDatos += `  ✓ Con planeación: ${datos.completos.join(', ')}\n`;
-    if (datos.faltantes.length) resumenDatos += `  ✗ Sin planeación: ${datos.faltantes.join(', ')}\n`;
-  });
-
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch('/api/coordinador/informe', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1000,
-        system: `Eres un asistente académico del Colegio Humboldt. 
-Redacta informes ejecutivos claros y profesionales para coordinadores académicos.
-Usa un tono directo y constructivo. Responde siempre en español.`,
-        messages: [{
-          role: 'user',
-          content: `Con base en este reporte de verificación de planeaciones académicas, redacta un informe ejecutivo breve para la coordinación. 
-Incluye: resumen del estado general, materias o cursos con mayor incumplimiento, y una recomendación de acción.
-
-DATOS DEL REPORTE:
-${resumenDatos}`
-        }]
-      })
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({reporte: reporteActual})
     });
-
     const data = await res.json();
-
-    if (data.content && data.content[0]) {
-      informeDiv.innerHTML = `<div class="text-sm text-on-surface whitespace-pre-wrap leading-relaxed">${data.content[0].text}</div>`;
-    } else if (data.error) {
-      informeDiv.innerHTML = `<div class="text-error text-sm">Error de API: ${data.error.message || 'Verifica tu API key en Perfil'}</div>`;
+    if (data.ok && data.informe) {
+      informeDiv.innerHTML = `<div class="text-sm text-on-surface whitespace-pre-wrap leading-relaxed"></div>`;
+      informeDiv.firstChild.textContent = data.informe;
+    } else {
+      informeDiv.innerHTML = `<div class="text-error text-sm"></div>`;
+      informeDiv.firstChild.textContent = data.error || 'No se pudo generar el informe.';
     }
   } catch(e) {
-    informeDiv.innerHTML = `<div class="text-error text-sm">Error de conexión con la IA.</div>`;
+    informeDiv.innerHTML = '<div class="text-error text-sm">Error de conexión con el servidor.</div>';
   }
 
   btn.disabled  = false;
