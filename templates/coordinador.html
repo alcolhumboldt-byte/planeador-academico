@@ -150,16 +150,6 @@
           </div>
         </div>
 
-        <!-- Pendientes -->
-        <div id="seccion-pendientes" class="hidden bg-surface-container rounded-3xl p-xl border border-outline-variant/20 shadow-sm">
-          <h3 class="text-base font-medium text-on-surface mb-xs flex items-center gap-sm">
-            <span class="material-symbols-outlined text-error">priority_high</span>
-            Pendientes por atender
-          </h3>
-          <p class="text-xs text-on-surface-variant mb-lg">Ordenados por número de bloques sin planear.</p>
-          <div id="lista-pendientes" class="space-y-xs"></div>
-        </div>
-
         <!-- Reportes guardados -->
         <div id="seccion-archivados" class="hidden bg-surface-container rounded-3xl p-xl border border-outline-variant/20 shadow-sm">
           <h3 class="text-base font-medium text-on-surface mb-lg flex items-center gap-sm">
@@ -443,18 +433,6 @@ async function cargarCuadricula() {
       return `<tr><td class="pr-md py-[2px] text-on-surface whitespace-nowrap sticky left-0 bg-surface-container">${f.materia}</td>${celdas}</tr>`;
     }).join('');
 
-    // Pendientes
-    if (d.pendientes && d.pendientes.length) {
-      document.getElementById('seccion-pendientes').classList.remove('hidden');
-      document.getElementById('lista-pendientes').innerHTML = d.pendientes.map(p => `
-        <div class="px-md py-sm rounded-xl bg-surface flex justify-between items-start gap-md">
-          <div>
-            <div class="text-sm text-on-surface">${p.materia} — ${p.curso}</div>
-            <div class="text-[11px] text-on-surface-variant">${p.fechas.join(' · ')}</div>
-          </div>
-          <span class="text-xs text-error whitespace-nowrap">${p.faltas} de ${p.total}</span>
-        </div>`).join('');
-    }
   } catch (e) { console.error('cuadricula', e); }
 }
 
