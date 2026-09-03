@@ -147,11 +147,16 @@ async function cargarArchivados() {
     document.getElementById('seccion-archivados').classList.remove('hidden');
     const cont = document.getElementById('lista-archivados');
     cont.innerHTML = d.reportes.map(x => `
-      <button onclick="abrirReporte('${x.archivo}')"
-        class="w-full text-left px-md py-sm rounded-xl hover:bg-surface-container-high transition-colors flex justify-between items-center">
-        <span class="text-sm text-on-surface">${x.fecha} — Periodo ${x.periodo}, Bloque ${x.bloque}</span>
-        <span class="text-xs text-on-surface-variant">${x.faltantes} sin planear de ${x.completos + x.faltantes}</span>
-      </button>`).join('');
+      <div class="px-md py-sm rounded-xl hover:bg-surface-container-high transition-colors flex justify-between items-center gap-md">
+        <button onclick="abrirReporte('${x.archivo}')" class="flex-1 text-left">
+          <span class="text-sm text-on-surface">${x.fecha} — Periodo ${x.periodo}, Bloque ${x.bloque}</span>
+        </button>
+        <span class="text-xs text-on-surface-variant whitespace-nowrap">${x.faltantes} sin planear de ${x.completos + x.faltantes}</span>
+        <button onclick="eliminarReporte('${x.archivo}')" title="Eliminar esta verificación"
+          class="text-on-surface-variant hover:text-error transition-colors">
+          <span class="material-symbols-outlined text-[18px]">delete</span>
+        </button>
+      </div>`).join('');
   } catch (e) { console.error('archivados', e); }
 }
 
@@ -164,6 +169,19 @@ async function abrirReporte(archivo) {
       window.scrollTo({top: 0, behavior: 'smooth'});
     }
   } catch (e) { console.error('abrir', e); }
+}
+
+async function eliminarReporte(archivo) {
+  if (!confirm('¿Eliminar esta verificación? No se puede deshacer.')) return;
+  try {
+    const r = await fetch('/api/coordinador/reporte/' + encodeURIComponent(archivo) + '/eliminar', {method: 'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      location.reload();
+    } else {
+      alert(d.error || 'No se pudo eliminar');
+    }
+  } catch (e) { alert('Error de conexión'); }
 }
 
 function mostrarReporte(reporte) {

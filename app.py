@@ -2966,6 +2966,24 @@ def coordinador_informe():
         return jsonify({"ok": False, "error": str(e)[:150]})
 
 
+@app.route("/api/coordinador/reporte/<archivo>/eliminar", methods=["POST"])
+def coordinador_eliminar_reporte(archivo):
+    nombre = usuario_actual()
+    if not nombre: return jsonify({"ok": False})
+    if not cargar_perfiles().get(nombre, {}).get("es_coordinador", False):
+        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
+    archivo = os.path.basename(re.sub(r"[^0-9A-Za-z_\-\.]", "", archivo))
+    ruta = os.path.join(CARPETA_REPORTES, archivo)
+    if not archivo.endswith(".json") or not os.path.isfile(ruta):
+        return jsonify({"ok": False, "error": "Reporte no encontrado"})
+    try:
+        os.remove(ruta)
+        log_auditoria("REPORTE_ELIMINADO", nombre, archivo)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:100]})
+
+
 @app.route("/api/coordinador/historial")
 def coordinador_historial():
     nombre = usuario_actual()
