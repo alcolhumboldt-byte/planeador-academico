@@ -253,7 +253,8 @@ function mostrarReporte(reporte) {
   document.getElementById('stat-faltantes').textContent = faltantes.length;
   document.getElementById('stat-total').textContent     = total;
 
-  const porMateria = reporte.por_materia || {};
+  // Agrupado por docente: cada bloque es una persona concreta
+  const porMateria = reporte.por_docente || reporte.por_materia || {};
 
   // Faltantes
   if (faltantes.length) {
@@ -416,7 +417,7 @@ async function cargarCuadricula() {
     // Cuadricula
     document.getElementById('seccion-cuadricula').classList.remove('hidden');
     document.getElementById('cuadricula-nota').textContent =
-      `Acumulado de ${d.corridas} verificación(es). Cada celda es una materia en un curso.`;
+      `Acumulado de ${d.corridas} verificación(es). Cada fila es un docente y cada columna un curso.`;
 
     document.getElementById('cuadricula-head').innerHTML =
       '<tr><th class="text-left pr-md pb-sm sticky left-0 bg-surface-container"></th>' +

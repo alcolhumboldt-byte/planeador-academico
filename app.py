@@ -2421,39 +2421,6 @@ def _listar_reportes():
     return salida
 
 
-def _historial_materias(limite=12):
-    """Agrega los reportes archivados por materia: cuantas veces se reviso,
-    cuantas falto, y en que fechas. Sirve para ver quien incumple seguido."""
-    archivos = [a for a in sorted(os.listdir(CARPETA_REPORTES))
-                if a.endswith(".json")] if os.path.isdir(CARPETA_REPORTES) else []
-    archivos = archivos[-limite:]
-    materias, corridas = {}, []
-    for arch in archivos:
-        try:
-            with open(os.path.join(CARPETA_REPORTES, arch), encoding="utf-8") as f:
-                d = json.load(f)
-        except Exception:
-            continue
-        etiqueta = "%s (P%s B%s)" % (d.get("fecha", "")[:10],
-                                     d.get("periodo", "?"), d.get("bloque", "?"))
-        corridas.append(etiqueta)
-        for mat, datos in (d.get("por_materia") or {}).items():
-            m = materias.setdefault(mat, {"revisadas": 0, "faltas": 0, "fechas": []})
-            n_f = len(datos.get("faltantes", []))
-            m["revisadas"] += n_f + len(datos.get("completos", []))
-            m["faltas"]    += n_f
-            if n_f:
-                m["fechas"].append(etiqueta)
-    salida = []
-    for mat, m in materias.items():
-        pct = round(100 * (m["revisadas"] - m["faltas"]) / m["revisadas"]) if m["revisadas"] else 0
-        salida.append({"materia": mat, "cumplimiento": pct,
-                       "faltas": m["faltas"], "revisadas": m["revisadas"],
-                       "fechas": m["fechas"][-5:]})
-    salida.sort(key=lambda x: (x["cumplimiento"], -x["faltas"]))
-    return {"corridas": corridas, "materias": salida}
-
-
 def _cuadricula(limite=12):
     """Arma una cuadricula materias x cursos con el estado acumulado, mas la
     lista de pendientes ordenada por gravedad. Cada celda corresponde a una
@@ -2462,7 +2429,7 @@ def _cuadricula(limite=12):
                 if a.endswith(".json")] if os.path.isdir(CARPETA_REPORTES) else []
     archivos = archivos[-limite:]
 
-    celdas, cursos, materias = {}, set(), set()
+    celdas, cursos, docentes = {}, set(), set()
     for arch in archivos:
         try:
             with open(os.path.join(CARPETA_REPORTES, arch), encoding="utf-8") as f:
@@ -2471,23 +2438,25 @@ def _cuadricula(limite=12):
             continue
         etiqueta = "%s (P%s B%s)" % (d.get("fecha", "")[:10],
                                      d.get("periodo", "?"), d.get("bloque", "?"))
-        for mat, datos in (d.get("por_materia") or {}).items():
-            materias.add(mat)
-            for curso in datos.get("completos", []):
+        for doc, datos in (d.get("por_docente") or {}).items():
+            docentes.add(doc)
+            for item in datos.get("completos", []):
+                curso = item.split(" ")[0]
                 cursos.add(curso)
-                c = celdas.setdefault((mat, curso), {"ok": 0, "falta": 0, "fechas": []})
+                c = celdas.setdefault((doc, curso), {"ok": 0, "falta": 0, "fechas": []})
                 c["ok"] += 1
-            for curso in datos.get("faltantes", []):
+            for item in datos.get("faltantes", []):
+                curso = item.split(" ")[0]
                 cursos.add(curso)
-                c = celdas.setdefault((mat, curso), {"ok": 0, "falta": 0, "fechas": []})
+                c = celdas.setdefault((doc, curso), {"ok": 0, "falta": 0, "fechas": []})
                 c["falta"] += 1
                 c["fechas"].append(etiqueta)
 
     cursos_ord   = sorted(cursos)
-    materias_ord = sorted(materias)
+    docentes_ord = sorted(docentes)
 
     filas, pendientes = [], []
-    for mat in materias_ord:
+    for mat in docentes_ord:
         fila = {"materia": mat, "celdas": []}
         for curso in cursos_ord:
             c = celdas.get((mat, curso))
@@ -2507,6 +2476,147 @@ def _cuadricula(limite=12):
     pendientes.sort(key=lambda x: (-x["faltas"], x["pct"]))
     return {"cursos": cursos_ord, "filas": filas,
             "pendientes": pendientes, "corridas": len(archivos)}
+
+
+URL_PLANES_OBS = "https://www.colhumboldt.controlacademico.com/modules.php?name=Plan_Aula_Obs"
+RUTA_CARGA     = os.path.join(CARPETA_DATOS, "carga_academica.json")
+
+# JS compartido: lee la tabla de resultados y las fechas de bloque en una
+# sola llamada. Columnas: 0=No 1=Per 2=Fecha Registro 3=Fecha Inicio
+# 4=Fecha Final 5=Informacion 6=Accion
+_JS_TABLA = """
+    var out = {fechas: [], filas: []};
+    var tablas = document.querySelectorAll('table'), t = null;
+    for (var i = 0; i < tablas.length; i++) {
+        if (tablas[i].textContent.indexOf('PLANES DE AULA') !== -1 && tablas[i].rows.length > 1) {
+            t = tablas[i];
+        }
+    }
+    if (t) {
+        for (var r = 0; r < t.rows.length; r++) {
+            var c = t.rows[r].cells;
+            if (c.length < 6) continue;
+            out.filas.push([(c[3].textContent||'').trim(), (c[5].textContent||'').trim()]);
+        }
+    }
+    var txt = document.body.innerText || '';
+    var re = /Fecha Inicio:\\s*(\\d{4}-\\d{2}-\\d{2})/g, m;
+    while ((m = re.exec(txt)) !== null) { out.fechas.push(m[1]); }
+    if (txt.indexOf('Fecha Inicio de Periodo') !== -1 && out.fechas.length > 1) { out.fechas.shift(); }
+    return out;
+"""
+
+
+def _obs_opciones(driver, id_select, recargar=False):
+    """Devuelve las opciones utiles de un select del modulo de observacion."""
+    if recargar:
+        driver.get(URL_PLANES_OBS)
+        time.sleep(2)
+    datos = driver.execute_script("""
+        var s = document.getElementById(arguments[0]);
+        if (!s) return [];
+        var out = [];
+        for (var i = 0; i < s.options.length; i++) {
+            var v = (s.options[i].value || '').trim();
+            var t = (s.options[i].text || '').trim();
+            if (!v || t.indexOf('SELECCIONE') !== -1) continue;
+            out.push({codigo: v, nombre: t});
+        }
+        return out;
+    """, id_select) or []
+    return datos
+
+
+def _obs_seleccionar(driver, id_select, valor):
+    """Selecciona un valor y dispara el change que la plataforma escucha."""
+    driver.execute_script("""
+        var s = document.getElementById(arguments[0]);
+        if (!s) return false;
+        s.value = arguments[1];
+        s.dispatchEvent(new Event('change', {bubbles: true}));
+        return true;
+    """, id_select, valor)
+
+
+def _obs_esperar(driver, id_select, timeout=20):
+    """Espera a que un select exista y tenga opciones reales."""
+    fin = time.time() + timeout
+    while time.time() < fin:
+        n = driver.execute_script(
+            "var s=document.getElementById(arguments[0]);"
+            "return s ? s.options.length : 0;", id_select) or 0
+        if n > 1:
+            return True
+        time.sleep(0.4)
+    return False
+
+
+def _obs_cursos(driver, cod_docente):
+    """Cursos que dicta un docente (la plataforma filtra el select por docente)."""
+    driver.get(URL_PLANES_OBS)
+    time.sleep(1.5)
+    _obs_seleccionar(driver, "DOCENTE", cod_docente)
+    if not _obs_esperar(driver, "CURSO"):
+        return []
+    time.sleep(0.5)
+    return _obs_opciones(driver, "CURSO")
+
+
+def _obs_asignaturas(driver, cod_docente, cod_curso):
+    """Asignaturas que ese docente dicta en ese curso."""
+    driver.get(URL_PLANES_OBS)
+    time.sleep(1.5)
+    _obs_seleccionar(driver, "DOCENTE", cod_docente)
+    if not _obs_esperar(driver, "CURSO"):
+        return []
+    _obs_seleccionar(driver, "CURSO", cod_curso)
+    if not _obs_esperar(driver, "ASIGNATURA"):
+        return []
+    time.sleep(0.5)
+    return _obs_opciones(driver, "ASIGNATURA")
+
+
+def _obs_verificar(driver, cod_docente, cod_curso, cod_asig, periodo, bloque):
+    """True si esa combinacion tiene planeacion en el bloque pedido."""
+    driver.get(URL_PLANES_OBS)
+    time.sleep(1.5)
+    _obs_seleccionar(driver, "DOCENTE", cod_docente)
+    if not _obs_esperar(driver, "CURSO"):
+        return False
+    _obs_seleccionar(driver, "CURSO", cod_curso)
+    if not _obs_esperar(driver, "ASIGNATURA"):
+        return False
+    _obs_seleccionar(driver, "ASIGNATURA", cod_asig)
+    _obs_seleccionar(driver, "PERIODO", str(periodo))
+    time.sleep(1)
+
+    driver.execute_script("var b=document.getElementById('buttonx'); if(b){b.click();}")
+    time.sleep(4)
+
+    datos = driver.execute_script(_JS_TABLA) or {"fechas": [], "filas": []}
+    fechas = datos.get("fechas") or []
+    idx = int(bloque)
+    fecha_bloque = fechas[idx] if 0 <= idx < len(fechas) else None
+
+    for fecha_ini, info in datos.get("filas") or []:
+        if not info:
+            continue
+        if fecha_bloque:
+            if fecha_ini == fecha_bloque:
+                return True
+        else:
+            return True
+    return False
+
+
+def _guardar_carga(carga):
+    """Guarda la carga academica descubierta durante el recorrido."""
+    if not carga:
+        return
+    asegurar_carpeta()
+    with open(RUTA_CARGA, "w", encoding="utf-8") as f:
+        json.dump({"actualizado": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                   "docentes": carga}, f, ensure_ascii=False, indent=1)
 
 
 def _login_automatico(driver, nombre, log):
@@ -2752,29 +2862,26 @@ def verificar_planeaciones():
         driver = _crear_driver_chrome()
 
         try:
+            driver.set_page_load_timeout(60)
+            driver.set_script_timeout(30)
             driver.get(URL_LOGIN)
             time.sleep(3)
             log("info", "El bot solo leerá datos, no modificará nada")
 
             es_headless = os.environ.get("HEADLESS", "false").lower() == "true"
-
-            # Primero se intenta el login automático con las credenciales del perfil
             sesion_ok = _login_automatico(driver, nombre, log)
 
             if not sesion_ok and es_headless:
-                # En el servidor no hay ventana visible: no se puede pedir login manual
                 log("error", "Login automático falló y el servidor no permite login manual. "
                              "Guarda tus credenciales del colegio en Perfil.")
                 driver.quit(); return
 
             if not sesion_ok:
-                # Solo en local (Mac con ventana visible) se espera al usuario
                 log("info", "Chrome abierto — inicia sesión como COORDINADOR en la plataforma")
-                for _ in range(180):  # 3 minutos
+                for _ in range(180):
                     time.sleep(1)
                     try:
-                        url = driver.current_url.lower()
-                        if "login" not in url and "data:" not in url:
+                        if "login" not in driver.current_url.lower():
                             sesion_ok = True
                             break
                     except Exception:
@@ -2784,293 +2891,97 @@ def verificar_planeaciones():
                 log("error", "No se detectó inicio de sesión")
                 driver.quit(); return
 
-            log("ok", "Sesión iniciada — comenzando verificación")
+            log("ok", "Sesión iniciada — leyendo lista de docentes")
 
-            # Sin estos timeouts, Selenium espera indefinidamente y el proceso
-            # queda colgado sin lanzar excepción (mismo bug del módulo de envío)
-            try:
-                driver.set_page_load_timeout(60)
-                driver.set_script_timeout(30)
-            except Exception:
-                pass
-
-            # Ir a Planes de Área
-            driver.get(URL_PLANES)
-            time.sleep(PAUSA + 2)
-
-            # Leer todos los cursos disponibles
-            try:
-                el_curso = WebDriverWait(driver, TIMEOUT).until(
-                    EC.presence_of_element_located((By.ID, "CURSO")))
-            except TimeoutException:
-                log("error", "No se pudo cargar Planes de Área")
+            # ── Fase 1: docentes ───────────────────────────────
+            docentes = _obs_opciones(driver, "DOCENTE", recargar=True)
+            if not docentes:
+                _capturar_debug(driver, "obs_sin_docentes")
+                log("error", "No se pudo leer la lista de docentes")
                 driver.quit(); return
 
-            cursos = []
-            for o in el_curso.find_elements(By.TAG_NAME, "option"):
-                val = o.get_attribute("value")
-                nom = o.text.strip()
-                if val and val != "" and "SELECCIONE" not in nom.upper():
-                    cursos.append({"codigo": val, "nombre": nom})
+            log("info", f"{len(docentes)} docentes · Periodo {periodo}, Bloque {bloque}")
 
-            log("info", f"Verificando {len(cursos)} cursos en Periodo {periodo}, Bloque {bloque}...")
-
-            # Estructura del reporte
             reporte = {
-                "periodo":   periodo,
-                "bloque":    bloque,
-                "completos": [],  # {curso, materia}
-                "faltantes": [],  # {curso, materia}
-                "por_materia": {},# materia -> {completos:[], faltantes:[]}
+                "periodo": periodo, "bloque": bloque,
+                "completos": [], "faltantes": [],
+                "por_docente": {}, "por_materia": {},
             }
+            carga = {}
 
-            total = len(cursos)
-            for i, curso in enumerate(cursos, 1):
-                log("info", f"[{i}/{total}] Revisando {curso['codigo']} — {curso['nombre']}...")
-
-                # Reiniciar el navegador entre cursos. El estado que Selenium
-                # acumula tras la primera tanda deja la sesion colgada al pasar
-                # al curso siguiente; empezar limpio lo evita.
-                if i > 1:
-                    try:
-                        driver.quit()
-                    except Exception:
-                        pass
-                    try:
-                        driver = _crear_driver_chrome()
-                        driver.set_page_load_timeout(60)
-                        driver.set_script_timeout(30)
-                        driver.get(URL_LOGIN)
-                        time.sleep(2)
-                        if not _login_automatico(driver, nombre, log):
-                            log("warn", f"  {curso['codigo']}: no se pudo reabrir sesión")
-                            continue
-                    except Exception as e:
-                        log("warn", f"  {curso['codigo']}: fallo al reiniciar navegador ({str(e)[:60]})")
-                        continue
-
+            # ── Fase 2: recorrido por docente ──────────────────
+            for i, doc in enumerate(docentes, 1):
+                log("info", f"[{i}/{len(docentes)}] {doc['nombre']}...")
                 try:
-                    # Reintento: la carga de la pagina puede exceder el timeout
-                    cargada = False
-                    for intento in (1, 2):
-                        try:
-                            driver.get(URL_PLANES)
-                            cargada = True
-                            break
-                        except TimeoutException:
-                            log("warn", f"  Carga lenta en {curso['codigo']}, reintento {intento}")
-                            try: driver.execute_script("window.stop();")
-                            except Exception: pass
-                    if not cargada:
-                        _capturar_debug(driver, f"coord_carga_{curso['codigo']}")
-                        log("warn", f"Error en {curso['codigo']}: no cargo Planes de Area")
-                        continue
-                    time.sleep(PAUSA)
-
-                    # Seleccionar curso
-                    el_c = WebDriverWait(driver, TIMEOUT).until(
-                        EC.presence_of_element_located((By.ID, "CURSO")))
-                    Select(el_c).select_by_value(curso["codigo"])
-                    time.sleep(PAUSA)
-
-                    # Esperar a que ASIGNATURA se repueble para este curso
-                    try:
-                        WebDriverWait(driver, TIMEOUT).until(
-                            lambda d: len(d.find_element(By.ID, "ASIGNATURA")
-                                          .find_elements(By.TAG_NAME, "option")) > 1)
-                    except TimeoutException:
-                        _capturar_debug(driver, f"coord_asig_{curso['codigo']}")
-                        log("warn", f"  {curso['codigo']}: no cargaron las asignaturas")
-                        continue
-
-                    # Leer asignaturas disponibles
-                    driver.execute_script("""
-                        var el=document.getElementById('ASIGNATURA');
-                        if(el){el.disabled=false;el.removeAttribute('disabled');}
-                    """)
-                    time.sleep(1)
-
-                    el_a = driver.find_element(By.ID, "ASIGNATURA")
-                    asigs = [
-                        {"codigo": o.get_attribute("value"), "nombre": o.text.strip()}
-                        for o in el_a.find_elements(By.TAG_NAME, "option")
-                        if o.get_attribute("value") and o.get_attribute("value") != ""
-                        and "SELECCIONE" not in o.text.upper()
-                    ]
-
-                    if not asigs:
-                        continue
-
-                    # Verificar cada asignatura
-                    for asig in asigs:
-                        try:
-                            # Cada clic en Listar recarga la pagina y CURSO vuelve
-                            # a su valor por defecto (el primero de la lista).
-                            # Hay que reseleccionarlo antes de cada materia, o se
-                            # fuerza una asignatura sobre el curso equivocado y la
-                            # pagina queda esperando indefinidamente.
-                            try:
-                                el_c2 = WebDriverWait(driver, TIMEOUT).until(
-                                    EC.presence_of_element_located((By.ID, "CURSO")))
-                                if el_c2.get_attribute("value") != curso["codigo"]:
-                                    Select(el_c2).select_by_value(curso["codigo"])
-                                    time.sleep(PAUSA)
-                                    WebDriverWait(driver, TIMEOUT).until(
-                                        lambda d: len(d.find_element(By.ID, "ASIGNATURA")
-                                                      .find_elements(By.TAG_NAME, "option")) > 1)
-                            except TimeoutException:
-                                _capturar_debug(driver, f"coord_recurso_{curso['codigo']}")
-                                log("warn", f"  {asig['nombre']}: no se pudo reseleccionar el curso")
-                                continue
-
-                            # Seleccionar asignatura
-                            driver.execute_script("""
-                                var el=document.getElementById('ASIGNATURA');
-                                el.disabled=false;el.removeAttribute('disabled');
-                                el.value=arguments[0];
-                                el.dispatchEvent(new Event('change',{bubbles:true}));
-                            """, asig["codigo"])
-                            time.sleep(2)
-
-                            # Seleccionar periodo
-                            try:
-                                Select(driver.find_element(By.ID, "PERIODO")).select_by_value(periodo)
-                            except Exception:
-                                driver.execute_script(
-                                    f"var el=document.getElementById('PERIODO');"
-                                    f"if(el){{el.value='{periodo}';"
-                                    f"el.dispatchEvent(new Event('change',{{bubbles:true}}));}}")
-                            time.sleep(1)
-
-                            # Click en Listar
-                            log("info", f"  · {asig['nombre']}: listando...")
-                            try:
-                                driver.execute_script("document.getElementById('buttonx').click();")
-                            except Exception:
-                                _capturar_debug(driver, f"coord_listar_{curso['codigo']}")
-                                log("warn", f"  {asig['nombre']}: no respondio Listar")
-                                continue
-                            time.sleep(4)
-
-                            # Si la plataforma abrió un modal, cerrarlo para no bloquear
-                            try:
-                                driver.execute_script("""
-                                    document.querySelectorAll('.modal.show, .modal[style*="display: block"]')
-                                        .forEach(function(m){
-                                            m.style.display='none';
-                                            m.classList.remove('show');
-                                        });
-                                    document.querySelectorAll('.modal-backdrop').forEach(function(b){b.remove();});
-                                    document.body.classList.remove('modal-open');
-                                """)
-                            except Exception:
-                                pass
-
-                            # Leer la tabla en UNA sola llamada al navegador.
-                            # Antes se recorrian las filas una por una (unos 100
-                            # viajes por materia) y se usaba body.text, que en
-                            # headless puede colgarse sin lanzar excepcion.
-                            log("info", f"  · {asig['nombre']}: leyendo tabla...")
-                            try:
-                                datos = driver.execute_script("""
-                                    var out = {fechas: [], filas: []};
-                                    var tablas = document.querySelectorAll('table');
-                                    var t = null;
-                                    for (var i = 0; i < tablas.length; i++) {
-                                        if (tablas[i].textContent.indexOf('PLANES DE AULA') !== -1) {
-                                            t = tablas[i];
-                                        }
-                                    }
-                                    if (t) {
-                                        for (var r = 0; r < t.rows.length; r++) {
-                                            var celdas = t.rows[r].cells;
-                                            if (celdas.length < 6) continue;
-                                            out.filas.push([
-                                                (celdas[3].textContent || '').trim(),
-                                                (celdas[5].textContent || '').trim()
-                                            ]);
-                                        }
-                                    }
-                                    var txt = document.body.innerText || '';
-                                    var re = /Fecha Inicio:\\s*(\\d{4}-\\d{2}-\\d{2})/g, m;
-                                    while ((m = re.exec(txt)) !== null) { out.fechas.push(m[1]); }
-                                    if (txt.indexOf('Fecha Inicio de Periodo') !== -1 && out.fechas.length > 1) {
-                                        out.fechas.shift();
-                                    }
-                                    return out;
-                                """) or {"fechas": [], "filas": []}
-                            except Exception:
-                                _capturar_debug(driver, f"coord_tabla_{curso['codigo']}")
-                                log("warn", f"  {asig['nombre']}: no se pudo leer la tabla")
-                                continue
-
-                            # Columnas reales: 0=No 1=Per 2=Fecha Registro
-                            # 3=Fecha Inicio 4=Fecha Final 5=Informacion 6=Accion
-                            fechas = datos.get("fechas") or []
-                            idx = int(bloque)
-                            fecha_bloque = fechas[idx] if 0 <= idx < len(fechas) else None
-
-                            tiene_planeacion = False
-                            for fecha_ini, info in datos.get("filas") or []:
-                                if not info:
-                                    continue
-                                if fecha_bloque:
-                                    if fecha_ini == fecha_bloque:
-                                        tiene_planeacion = True
-                                        break
-                                else:
-                                    tiene_planeacion = True
-                                    break
-
-                            entrada = {
-                                "curso":   curso["codigo"],
-                                "nombre_curso": curso["nombre"],
-                                "materia": asig["nombre"],
-                                "codigo_materia": asig["codigo"],
-                            }
-
-                            if tiene_planeacion:
-                                reporte["completos"].append(entrada)
-                                nom_mat = asig["nombre"]
-                                if nom_mat not in reporte["por_materia"]:
-                                    reporte["por_materia"][nom_mat] = {"completos": [], "faltantes": []}
-                                reporte["por_materia"][nom_mat]["completos"].append(curso["codigo"])
-                                log("ok", f"  ✓ {asig['nombre']}")
-                            else:
-                                reporte["faltantes"].append(entrada)
-                                nom_mat = asig["nombre"]
-                                if nom_mat not in reporte["por_materia"]:
-                                    reporte["por_materia"][nom_mat] = {"completos": [], "faltantes": []}
-                                reporte["por_materia"][nom_mat]["faltantes"].append(curso["codigo"])
-                                log("warn", f"  ✗ {asig['nombre']} — SIN PLANEACIÓN")
-
-                        except Exception as ex:
-                            log("warn", f"  Error en {asig['nombre']}: {str(ex)[:40]}")
-                            continue
-
+                    cursos = _obs_cursos(driver, doc["codigo"])
                 except Exception as ex:
-                    log("warn", f"Error en {curso['codigo']}: {str(ex)[:40]}")
+                    log("warn", f"  {doc['nombre']}: no se pudieron leer sus cursos ({str(ex)[:40]})")
                     continue
 
-            # Guardar reporte y cerrar Chrome (coordinador no mantiene sesión)
+                if not cursos:
+                    log("info", f"  {doc['nombre']}: sin cursos asignados")
+                    continue
+
+                carga[doc["nombre"]] = []
+
+                for curso in cursos:
+                    try:
+                        asigs = _obs_asignaturas(driver, doc["codigo"], curso["codigo"])
+                    except Exception as ex:
+                        log("warn", f"  {curso['codigo']}: no se pudieron leer asignaturas ({str(ex)[:40]})")
+                        continue
+
+                    for asig in asigs:
+                        carga[doc["nombre"]].append(
+                            {"curso": curso["codigo"], "asignatura": asig["nombre"]})
+                        try:
+                            estado = _obs_verificar(
+                                driver, doc["codigo"], curso["codigo"],
+                                asig["codigo"], periodo, bloque)
+                        except Exception as ex:
+                            log("warn", f"  {curso['codigo']} {asig['nombre'][:22]}: {str(ex)[:35]}")
+                            continue
+
+                        entrada = {
+                            "docente": doc["nombre"], "curso": curso["codigo"],
+                            "materia": asig["nombre"],
+                        }
+                        d = reporte["por_docente"].setdefault(
+                            doc["nombre"], {"completos": [], "faltantes": []})
+                        m = reporte["por_materia"].setdefault(
+                            asig["nombre"], {"completos": [], "faltantes": []})
+
+                        if estado:
+                            reporte["completos"].append(entrada)
+                            d["completos"].append(f"{curso['codigo']} {asig['nombre']}")
+                            m["completos"].append(curso["codigo"])
+                            log("ok", f"  ✓ {curso['codigo']} — {asig['nombre']}")
+                        else:
+                            reporte["faltantes"].append(entrada)
+                            d["faltantes"].append(f"{curso['codigo']} {asig['nombre']}")
+                            m["faltantes"].append(curso["codigo"])
+                            log("warn", f"  ✗ {curso['codigo']} — {asig['nombre']} — SIN PLANEACIÓN")
+
             _reporte_sesiones[session_id]["reporte"] = reporte
             try:
                 _guardar_reporte(reporte, nombre)
+                _guardar_carga(carga)
             except Exception as ex:
                 log("warn", f"No se pudo archivar el reporte: {str(ex)[:50]}")
-            try: driver.quit()
-            except: pass
 
-            # Resumen final
+            try: driver.quit()
+            except Exception: pass
+
             total_ok  = len(reporte["completos"])
             total_fal = len(reporte["faltantes"])
             log("ok", f"Verificación completada — {total_ok} con planeación, {total_fal} sin planeación")
-            log("done", f"Reporte listo — revisa los resultados")
+            log("done", "Reporte listo — revisa los resultados")
 
         except Exception as e:
             log("error", f"Error general: {str(e)}")
             try: driver.quit()
-            except: pass
+            except Exception: pass
+
 
     threading.Thread(target=correr_verificacion, daemon=True).start()
     return jsonify({"ok": True, "session_id": session_id})
@@ -3108,15 +3019,6 @@ def coordinador_reporte(archivo):
         return jsonify({"ok": False, "error": "Reporte no encontrado"})
     with open(ruta, encoding="utf-8") as f:
         return jsonify({"ok": True, "reporte": json.load(f)})
-
-
-@app.route("/api/coordinador/historial")
-def coordinador_historial():
-    nombre = usuario_actual()
-    if not nombre: return jsonify({"ok": False})
-    if not cargar_perfiles().get(nombre, {}).get("es_coordinador", False):
-        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
-    return jsonify({"ok": True, **_historial_materias()})
 
 
 @app.route("/api/coordinador/cuadricula")
