@@ -2682,6 +2682,17 @@ def agente_progreso(session_id):
 _reporte_sesiones = {}  # session_id -> {logs, reporte}
 
 
+@app.route("/coordinador/historial")
+def coordinador_historial_vista():
+    nombre = usuario_actual()
+    if not nombre: return redirect(url_for("index"))
+    perfiles = cargar_perfiles()
+    if not perfiles[nombre].get("es_coordinador", False):
+        return redirect(url_for("dashboard"))
+    return render_template("historial.html",
+        nombre=nombre, año=get_año(perfiles, nombre), es_coordinador=True)
+
+
 @app.route("/coordinador")
 def coordinador():
     nombre = usuario_actual()

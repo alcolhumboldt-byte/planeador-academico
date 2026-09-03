@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}Historial Planeador{% endblock %}
+
+{% block body %}
+<div class="flex min-h-screen bg-surface">
+  {% include "layout.html" %}
+
+  <main class="flex-1 flex flex-col">
+    <header class="sticky top-0 z-40 bg-surface/80 backdrop-blur-md flex items-center h-16 px-lg w-full border-b border-outline-variant/20">
+      <div class="flex items-center gap-sm">
+        <span class="material-symbols-outlined text-primary">bar_chart</span>
+        <h1 class="text-lg font-medium text-on-surface">Historial Planeador</h1>
+      </div>
+    </header>
+
+    <section class="p-lg md:p-xl flex-1 max-w-4xl mx-auto w-full pb-20 md:pb-xl">
+
+      <div class="mb-xl">
+        <p class="text-sm text-on-surface-variant">
+          Cumplimiento acumulado de las verificaciones guardadas.
+        </p>
+      </div>
+
+      <div class="space-y-lg">
+        <!-- Historial Planeador -->
+        <div id="seccion-historial" class="hidden bg-surface-container rounded-3xl p-xl border border-outline-variant/20 shadow-sm">
+          <div class="flex items-center justify-between flex-wrap gap-md mb-xs">
+            <h3 class="text-base font-medium text-on-surface flex items-center gap-sm">
+              <span class="material-symbols-outlined text-primary">bar_chart</span>
+              Historial Planeador
+            </h3>
+            <select id="filtro-periodo" onchange="cargarHistorial()"
+              class="text-sm bg-surface border border-outline-variant/40 rounded-xl px-md py-xs text-on-surface">
+              <option value="todo">Todo el año</option>
+            </select>
+          </div>
+          <p id="historial-nota" class="text-xs text-on-surface-variant mb-lg"></p>
+
+          <!-- Evolucion -->
+          <div id="bloque-evolucion" class="mb-xl hidden">
+            <div class="text-sm text-on-surface mb-sm">Cumplimiento por verificación</div>
+            <div id="grafica-evolucion" class="flex items-end gap-xs h-28"></div>
+            <div id="etiquetas-evolucion" class="flex gap-xs mt-xs"></div>
+          </div>
+
+          <!-- Ranking -->
+          <div class="text-sm text-on-surface mb-sm">Planeaciones por docente</div>
+          <div id="ranking-docentes" class="space-y-sm"></div>
+        </div>
+
+        <!-- Reportes guardados -->
+        <div id="seccion-archivados" class="hidden bg-surface-container rounded-3xl p-xl border border-outline-variant/20 shadow-sm">
+          <h3 class="text-base font-medium text-on-surface mb-lg flex items-center gap-sm">
+            <span class="material-symbols-outlined text-primary">history</span>
+            Verificaciones anteriores
+          </h3>
+          <div id="lista-archivados" class="space-y-xs"></div>
+        </div>
+
+      </div>
+
+      <div id="vacio-historial" class="hidden text-center py-2xl">
+        <span class="material-symbols-outlined text-on-surface-variant text-5xl">insights</span>
+        <p class="text-sm text-on-surface-variant mt-md">
+          Todavía no hay verificaciones guardadas.
+        </p>
+        <a href="/coordinador" class="inline-block mt-lg text-sm text-primary">Ir a verificar planeaciones</a>
+      </div>
+
+    </section>
+  </main>
+</div>
+
+<script>
+let reporteActual = null;
+
+async function cargarHistorial() {
+  try {
+    const sel = document.getElementById('filtro-periodo');
+    const periodo = sel ? sel.value : 'todo';
+    const r = await fetch('/api/coordinador/historial?periodo=' + encodeURIComponent(periodo));
+    const d = await r.json();
+    if (!d.ok || !d.ranking || !d.ranking.length) return;
+
+    document.getElementById('seccion-historial').classList.remove('hidden');
+
+    // Opciones de periodo (solo la primera vez)
+    if (sel && sel.options.length === 1 && d.periodos) {
+      d.periodos.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p; o.textContent = 'Periodo ' + p;
+        sel.appendChild(o);
+      });
+    }
+
+    document.getElementById('historial-nota').textContent =
+      `Basado en ${d.verificaciones} verificación(es). Los bloques que no se hayan verificado no aparecen aquí.`;
+
+    // Evolucion
+    const eb = document.getElementById('bloque-evolucion');
+    if (d.evolucion && d.evolucion.length > 1) {
+      eb.classList.remove('hidden');
+      document.getElementById('grafica-evolucion').innerHTML = d.evolucion.map(e => {
+        const color = e.pct >= 80 ? 'bg-tertiary' : (e.pct >= 50 ? 'bg-primary' : 'bg-error');
+        return `<div class="flex-1 flex flex-col justify-end items-center" title="${e.etiqueta} — ${e.pct}% (${e.faltantes} sin planear)">
+                  <span class="text-[10px] text-on-surface-variant mb-xs">${e.pct}%</span>
+                  <div class="w-full ${color} rounded-t" style="height:${Math.max(e.pct, 3)}%"></div>
+                </div>`;
+      }).join('');
+      document.getElementById('etiquetas-evolucion').innerHTML = d.evolucion.map(e =>
+        `<div class="flex-1 text-center text-[10px] text-on-surface-variant">${e.etiqueta}</div>`).join('');
+    } else { eb.classList.add('hidden'); }
+
+    // Ranking
+    const max = Math.max(...d.ranking.map(x => x.total), 1);
+    document.getElementById('ranking-docentes').innerHTML = d.ranking.map((x, i) => {
+      const anchoOk  = (x.hechas / max) * 100;
+      const anchoFal = (x.faltantes / max) * 100;
+      const estado = x.faltantes
+        ? `<span class="text-error">${x.faltantes} sin planear</span>`
+        : `<span class="text-tertiary">al día</span>`;
+      const detalle = x.detalle.length
+        ? x.detalle.map(f => `${f.item} (${f.bloque})`).join(' · ')
+        : '';
+      return `
+        <div class="cursor-pointer" onclick="const e=document.getElementById('det-${i}'); e.classList.toggle('hidden');">
+          <div class="flex justify-between items-baseline mb-xs">
+            <span class="text-sm text-on-surface">${x.docente}</span>
+            <span class="text-xs text-on-surface-variant">${x.hechas} hechas · ${estado}</span>
+          </div>
+          <div class="flex h-2 w-full bg-surface-container-high rounded-full overflow-hidden">
+            <div class="bg-tertiary h-2" style="width:${anchoOk}%"></div>
+            <div class="bg-error h-2" style="width:${anchoFal}%"></div>
+          </div>
+          <div id="det-${i}" class="hidden text-[11px] text-on-surface-variant mt-xs">${detalle || 'Sin pendientes registrados'}</div>
+        </div>`;
+    }).join('');
+  } catch (e) { console.error('historial', e); }
+}
+
+async function cargarArchivados() {
+  try {
+    const r = await fetch('/api/coordinador/reportes');
+    const d = await r.json();
+    if (!d.ok || !d.reportes || !d.reportes.length) return;
+
+    document.getElementById('seccion-archivados').classList.remove('hidden');
+    const cont = document.getElementById('lista-archivados');
+    cont.innerHTML = d.reportes.map(x => `
+      <button onclick="abrirReporte('${x.archivo}')"
+        class="w-full text-left px-md py-sm rounded-xl hover:bg-surface-container-high transition-colors flex justify-between items-center">
+        <span class="text-sm text-on-surface">${x.fecha} — Periodo ${x.periodo}, Bloque ${x.bloque}</span>
+        <span class="text-xs text-on-surface-variant">${x.faltantes} sin planear de ${x.completos + x.faltantes}</span>
+      </button>`).join('');
+  } catch (e) { console.error('archivados', e); }
+}
+
+async function abrirReporte(archivo) {
+  try {
+    const r = await fetch('/api/coordinador/reporte/' + encodeURIComponent(archivo));
+    const d = await r.json();
+    if (d.ok && d.reporte) {
+      mostrarReporte(d.reporte);
+      window.scrollTo({top: 0, behavior: 'smooth'});
+    }
+  } catch (e) { console.error('abrir', e); }
+}
+
+function mostrarReporte(reporte) {
+  // En esta pantalla el reporte se abre en la vista de coordinador
+  sessionStorage.setItem('reporte_abierto', JSON.stringify(reporte));
+  window.location.href = '/coordinador?ver=archivado';
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  await cargarHistorial();
+  await cargarArchivados();
+  const hayHistorial = !document.getElementById('seccion-historial').classList.contains('hidden');
+  const hayArchivo   = !document.getElementById('seccion-archivados').classList.contains('hidden');
+  if (!hayHistorial && !hayArchivo) {
+    document.getElementById('vacio-historial').classList.remove('hidden');
+  }
+});
+</script>
+{% endblock %}
