@@ -129,25 +129,30 @@
           <div id="lista-completos" class="space-y-md"></div>
         </div>
 
-        <!-- Cuadricula -->
-        <div id="seccion-cuadricula" class="hidden bg-surface-container rounded-3xl p-xl border border-outline-variant/20 shadow-sm">
-          <h3 class="text-base font-medium text-on-surface mb-xs flex items-center gap-sm">
-            <span class="material-symbols-outlined text-primary">grid_view</span>
-            Mapa de cumplimiento
-          </h3>
-          <p id="cuadricula-nota" class="text-xs text-on-surface-variant mb-lg"></p>
-          <div class="overflow-x-auto">
-            <table class="text-xs border-collapse">
-              <thead id="cuadricula-head"></thead>
-              <tbody id="cuadricula-body"></tbody>
-            </table>
+        <!-- Historial Planeador -->
+        <div id="seccion-historial" class="hidden bg-surface-container rounded-3xl p-xl border border-outline-variant/20 shadow-sm">
+          <div class="flex items-center justify-between flex-wrap gap-md mb-xs">
+            <h3 class="text-base font-medium text-on-surface flex items-center gap-sm">
+              <span class="material-symbols-outlined text-primary">bar_chart</span>
+              Historial Planeador
+            </h3>
+            <select id="filtro-periodo" onchange="cargarHistorial()"
+              class="text-sm bg-surface border border-outline-variant/40 rounded-xl px-md py-xs text-on-surface">
+              <option value="todo">Todo el año</option>
+            </select>
           </div>
-          <div class="flex gap-md mt-lg text-[11px] text-on-surface-variant">
-            <span class="flex items-center gap-xs"><span class="inline-block w-3 h-3 rounded bg-tertiary"></span>Al día</span>
-            <span class="flex items-center gap-xs"><span class="inline-block w-3 h-3 rounded bg-primary"></span>Parcial</span>
-            <span class="flex items-center gap-xs"><span class="inline-block w-3 h-3 rounded bg-error"></span>Sin planear</span>
-            <span class="flex items-center gap-xs"><span class="inline-block w-3 h-3 rounded bg-surface-container-high"></span>No aplica</span>
+          <p id="historial-nota" class="text-xs text-on-surface-variant mb-lg"></p>
+
+          <!-- Evolucion -->
+          <div id="bloque-evolucion" class="mb-xl hidden">
+            <div class="text-sm text-on-surface mb-sm">Cumplimiento por verificación</div>
+            <div id="grafica-evolucion" class="flex items-end gap-xs h-28"></div>
+            <div id="etiquetas-evolucion" class="flex gap-xs mt-xs"></div>
           </div>
+
+          <!-- Ranking -->
+          <div class="text-sm text-on-surface mb-sm">Planeaciones por docente</div>
+          <div id="ranking-docentes" class="space-y-sm"></div>
         </div>
 
         <!-- Reportes guardados -->
@@ -377,33 +382,68 @@ function nuevaVerificacion() {
 }
 
 // ── Historial y reportes guardados ──────────────
-async function cargarCuadricula() {
+async function cargarHistorial() {
   try {
-    const r = await fetch('/api/coordinador/cuadricula');
+    const sel = document.getElementById('filtro-periodo');
+    const periodo = sel ? sel.value : 'todo';
+    const r = await fetch('/api/coordinador/historial?periodo=' + encodeURIComponent(periodo));
     const d = await r.json();
-    if (!d.ok || !d.filas || !d.filas.length) return;
+    if (!d.ok || !d.ranking || !d.ranking.length) return;
 
-    // Cuadricula
-    document.getElementById('seccion-cuadricula').classList.remove('hidden');
-    document.getElementById('cuadricula-nota').textContent =
-      `Acumulado de ${d.corridas} verificación(es). Cada fila es un docente y cada columna un curso.`;
+    document.getElementById('seccion-historial').classList.remove('hidden');
 
-    document.getElementById('cuadricula-head').innerHTML =
-      '<tr><th class="text-left pr-md pb-sm sticky left-0 bg-surface-container"></th>' +
-      d.cursos.map(c => `<th class="px-xs pb-sm text-on-surface-variant font-medium">${c}</th>`).join('') +
-      '</tr>';
+    // Opciones de periodo (solo la primera vez)
+    if (sel && sel.options.length === 1 && d.periodos) {
+      d.periodos.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p; o.textContent = 'Periodo ' + p;
+        sel.appendChild(o);
+      });
+    }
 
-    document.getElementById('cuadricula-body').innerHTML = d.filas.map(f => {
-      const celdas = f.celdas.map(c => {
-        if (!c) return '<td class="p-[2px]"><div class="w-5 h-5 rounded bg-surface-container-high/40"></div></td>';
-        const color = c.pct >= 100 ? 'bg-tertiary' : (c.pct > 0 ? 'bg-primary' : 'bg-error');
-        const tip = `${f.materia} — ${c.curso}: ${c.faltas} de ${c.total} sin planear`;
-        return `<td class="p-[2px]"><div class="w-5 h-5 rounded ${color}" title="${tip}"></div></td>`;
+    document.getElementById('historial-nota').textContent =
+      `Basado en ${d.verificaciones} verificación(es). Los bloques que no se hayan verificado no aparecen aquí.`;
+
+    // Evolucion
+    const eb = document.getElementById('bloque-evolucion');
+    if (d.evolucion && d.evolucion.length > 1) {
+      eb.classList.remove('hidden');
+      document.getElementById('grafica-evolucion').innerHTML = d.evolucion.map(e => {
+        const color = e.pct >= 80 ? 'bg-tertiary' : (e.pct >= 50 ? 'bg-primary' : 'bg-error');
+        return `<div class="flex-1 flex flex-col justify-end items-center" title="${e.etiqueta} — ${e.pct}% (${e.faltantes} sin planear)">
+                  <span class="text-[10px] text-on-surface-variant mb-xs">${e.pct}%</span>
+                  <div class="w-full ${color} rounded-t" style="height:${Math.max(e.pct, 3)}%"></div>
+                </div>`;
       }).join('');
-      return `<tr><td class="pr-md py-[2px] text-on-surface whitespace-nowrap sticky left-0 bg-surface-container">${f.materia}</td>${celdas}</tr>`;
-    }).join('');
+      document.getElementById('etiquetas-evolucion').innerHTML = d.evolucion.map(e =>
+        `<div class="flex-1 text-center text-[10px] text-on-surface-variant">${e.etiqueta}</div>`).join('');
+    } else { eb.classList.add('hidden'); }
 
-  } catch (e) { console.error('cuadricula', e); }
+    // Ranking
+    const max = Math.max(...d.ranking.map(x => x.total), 1);
+    document.getElementById('ranking-docentes').innerHTML = d.ranking.map((x, i) => {
+      const anchoOk  = (x.hechas / max) * 100;
+      const anchoFal = (x.faltantes / max) * 100;
+      const estado = x.faltantes
+        ? `<span class="text-error">${x.faltantes} sin planear</span>`
+        : `<span class="text-tertiary">al día</span>`;
+      const detalle = x.detalle.length
+        ? x.detalle.map(f => `${f.item} (${f.bloque})`).join(' · ')
+        : '';
+      return `
+        <div class="cursor-pointer" onclick="const e=document.getElementById('det-${i}'); e.classList.toggle('hidden');">
+          <div class="flex justify-between items-baseline mb-xs">
+            <span class="text-sm text-on-surface">${x.docente}</span>
+            <span class="text-xs text-on-surface-variant">${x.hechas} hechas · ${estado}</span>
+          </div>
+          <div class="flex h-2 w-full bg-surface-container-high rounded-full overflow-hidden">
+            <div class="bg-tertiary h-2" style="width:${anchoOk}%"></div>
+            <div class="bg-error h-2" style="width:${anchoFal}%"></div>
+          </div>
+          <div id="det-${i}" class="hidden text-[11px] text-on-surface-variant mt-xs">${detalle || 'Sin pendientes registrados'}</div>
+        </div>`;
+    }).join('');
+  } catch (e) { console.error('historial', e); }
 }
 
 async function cargarArchivados() {
@@ -435,7 +475,7 @@ async function abrirReporte(archivo) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  cargarCuadricula();
+  cargarHistorial();
   cargarArchivados();
 });
 

@@ -2421,202 +2421,72 @@ def _listar_reportes():
     return salida
 
 
-def _cuadricula(limite=12):
-    """Arma una cuadricula materias x cursos con el estado acumulado, mas la
-    lista de pendientes ordenada por gravedad. Cada celda corresponde a una
-    combinacion materia+curso, que es lo que identifica a un docente."""
-    archivos = [a for a in sorted(os.listdir(CARPETA_REPORTES))
-                if a.endswith(".json")] if os.path.isdir(CARPETA_REPORTES) else []
-    archivos = archivos[-limite:]
-
-    celdas, cursos, docentes = {}, set(), set()
-    for arch in archivos:
+def _reportes_unicos(periodo=None):
+    """Carga los reportes archivados. Si un mismo periodo+bloque se verifico
+    varias veces, conserva solo la corrida mas reciente: sin esto los totales
+    del año quedarian inflados."""
+    if not os.path.isdir(CARPETA_REPORTES):
+        return []
+    porclave = {}
+    for arch in sorted(os.listdir(CARPETA_REPORTES)):
+        if not arch.endswith(".json"):
+            continue
         try:
             with open(os.path.join(CARPETA_REPORTES, arch), encoding="utf-8") as f:
                 d = json.load(f)
         except Exception:
             continue
-        etiqueta = "%s (P%s B%s)" % (d.get("fecha", "")[:10],
-                                     d.get("periodo", "?"), d.get("bloque", "?"))
-        for doc, datos in (d.get("por_docente") or {}).items():
-            docentes.add(doc)
-            for item in datos.get("completos", []):
-                curso = item.split(" ")[0]
-                cursos.add(curso)
-                c = celdas.setdefault((doc, curso), {"ok": 0, "falta": 0, "fechas": []})
-                c["ok"] += 1
-            for item in datos.get("faltantes", []):
-                curso = item.split(" ")[0]
-                cursos.add(curso)
-                c = celdas.setdefault((doc, curso), {"ok": 0, "falta": 0, "fechas": []})
-                c["falta"] += 1
-                c["fechas"].append(etiqueta)
-
-    cursos_ord   = sorted(cursos)
-    docentes_ord = sorted(docentes)
-
-    filas, pendientes = [], []
-    for mat in docentes_ord:
-        fila = {"materia": mat, "celdas": []}
-        for curso in cursos_ord:
-            c = celdas.get((mat, curso))
-            if not c:
-                fila["celdas"].append(None)
-                continue
-            total = c["ok"] + c["falta"]
-            pct   = round(100 * c["ok"] / total) if total else 0
-            fila["celdas"].append({"curso": curso, "pct": pct,
-                                   "faltas": c["falta"], "total": total})
-            if c["falta"]:
-                pendientes.append({"materia": mat, "curso": curso,
-                                   "faltas": c["falta"], "total": total,
-                                   "pct": pct, "fechas": c["fechas"][-4:]})
-        filas.append(fila)
-
-    pendientes.sort(key=lambda x: (-x["faltas"], x["pct"]))
-    return {"cursos": cursos_ord, "filas": filas,
-            "pendientes": pendientes, "corridas": len(archivos)}
-
-
-URL_PLANES_OBS = "https://www.colhumboldt.controlacademico.com/modules.php?name=Plan_Aula_Obs"
-RUTA_CARGA     = os.path.join(CARPETA_DATOS, "carga_academica.json")
-
-# JS compartido: lee la tabla de resultados y las fechas de bloque en una
-# sola llamada. Columnas: 0=No 1=Per 2=Fecha Registro 3=Fecha Inicio
-# 4=Fecha Final 5=Informacion 6=Accion
-_JS_TABLA = """
-    var out = {fechas: [], filas: []};
-    var tablas = document.querySelectorAll('table'), t = null;
-    for (var i = 0; i < tablas.length; i++) {
-        if (tablas[i].textContent.indexOf('PLANES DE AULA') !== -1 && tablas[i].rows.length > 1) {
-            t = tablas[i];
-        }
-    }
-    if (t) {
-        for (var r = 0; r < t.rows.length; r++) {
-            var c = t.rows[r].cells;
-            if (c.length < 6) continue;
-            out.filas.push([(c[3].textContent||'').trim(), (c[5].textContent||'').trim()]);
-        }
-    }
-    var txt = document.body.innerText || '';
-    var re = /Fecha Inicio:\\s*(\\d{4}-\\d{2}-\\d{2})/g, m;
-    while ((m = re.exec(txt)) !== null) { out.fechas.push(m[1]); }
-    if (txt.indexOf('Fecha Inicio de Periodo') !== -1 && out.fechas.length > 1) { out.fechas.shift(); }
-    return out;
-"""
-
-
-def _obs_opciones(driver, id_select, recargar=False):
-    """Devuelve las opciones utiles de un select del modulo de observacion."""
-    if recargar:
-        driver.get(URL_PLANES_OBS)
-        time.sleep(2)
-    datos = driver.execute_script("""
-        var s = document.getElementById(arguments[0]);
-        if (!s) return [];
-        var out = [];
-        for (var i = 0; i < s.options.length; i++) {
-            var v = (s.options[i].value || '').trim();
-            var t = (s.options[i].text || '').trim();
-            if (!v || t.indexOf('SELECCIONE') !== -1) continue;
-            out.push({codigo: v, nombre: t});
-        }
-        return out;
-    """, id_select) or []
-    return datos
-
-
-def _obs_seleccionar(driver, id_select, valor):
-    """Selecciona un valor y dispara el change que la plataforma escucha."""
-    driver.execute_script("""
-        var s = document.getElementById(arguments[0]);
-        if (!s) return false;
-        s.value = arguments[1];
-        s.dispatchEvent(new Event('change', {bubbles: true}));
-        return true;
-    """, id_select, valor)
-
-
-def _obs_esperar(driver, id_select, timeout=20):
-    """Espera a que un select exista y tenga opciones reales."""
-    fin = time.time() + timeout
-    while time.time() < fin:
-        n = driver.execute_script(
-            "var s=document.getElementById(arguments[0]);"
-            "return s ? s.options.length : 0;", id_select) or 0
-        if n > 1:
-            return True
-        time.sleep(0.4)
-    return False
-
-
-def _obs_cursos(driver, cod_docente):
-    """Cursos que dicta un docente (la plataforma filtra el select por docente)."""
-    driver.get(URL_PLANES_OBS)
-    time.sleep(1.5)
-    _obs_seleccionar(driver, "DOCENTE", cod_docente)
-    if not _obs_esperar(driver, "CURSO"):
-        return []
-    time.sleep(0.5)
-    return _obs_opciones(driver, "CURSO")
-
-
-def _obs_asignaturas(driver, cod_docente, cod_curso):
-    """Asignaturas que ese docente dicta en ese curso."""
-    driver.get(URL_PLANES_OBS)
-    time.sleep(1.5)
-    _obs_seleccionar(driver, "DOCENTE", cod_docente)
-    if not _obs_esperar(driver, "CURSO"):
-        return []
-    _obs_seleccionar(driver, "CURSO", cod_curso)
-    if not _obs_esperar(driver, "ASIGNATURA"):
-        return []
-    time.sleep(0.5)
-    return _obs_opciones(driver, "ASIGNATURA")
-
-
-def _obs_verificar(driver, cod_docente, cod_curso, cod_asig, periodo, bloque):
-    """True si esa combinacion tiene planeacion en el bloque pedido."""
-    driver.get(URL_PLANES_OBS)
-    time.sleep(1.5)
-    _obs_seleccionar(driver, "DOCENTE", cod_docente)
-    if not _obs_esperar(driver, "CURSO"):
-        return False
-    _obs_seleccionar(driver, "CURSO", cod_curso)
-    if not _obs_esperar(driver, "ASIGNATURA"):
-        return False
-    _obs_seleccionar(driver, "ASIGNATURA", cod_asig)
-    _obs_seleccionar(driver, "PERIODO", str(periodo))
-    time.sleep(1)
-
-    driver.execute_script("var b=document.getElementById('buttonx'); if(b){b.click();}")
-    time.sleep(4)
-
-    datos = driver.execute_script(_JS_TABLA) or {"fechas": [], "filas": []}
-    fechas = datos.get("fechas") or []
-    idx = int(bloque)
-    fecha_bloque = fechas[idx] if 0 <= idx < len(fechas) else None
-
-    for fecha_ini, info in datos.get("filas") or []:
-        if not info:
+        if periodo not in (None, "", "todo") and str(d.get("periodo")) != str(periodo):
             continue
-        if fecha_bloque:
-            if fecha_ini == fecha_bloque:
-                return True
-        else:
-            return True
-    return False
+        clave = (str(d.get("periodo")), str(d.get("bloque")))
+        anterior = porclave.get(clave)
+        if not anterior or d.get("fecha", "") >= anterior.get("fecha", ""):
+            porclave[clave] = d
+    return sorted(porclave.values(), key=lambda x: x.get("fecha", ""))
 
 
-def _guardar_carga(carga):
-    """Guarda la carga academica descubierta durante el recorrido."""
-    if not carga:
-        return
-    asegurar_carpeta()
-    with open(RUTA_CARGA, "w", encoding="utf-8") as f:
-        json.dump({"actualizado": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                   "docentes": carga}, f, ensure_ascii=False, indent=1)
+def _historial(periodo=None):
+    """Arma el ranking por docente y la evolucion del cumplimiento."""
+    reportes = _reportes_unicos(periodo)
+
+    docentes, evolucion = {}, []
+    for d in reportes:
+        ok_total = len(d.get("completos") or [])
+        fal_total = len(d.get("faltantes") or [])
+        tot = ok_total + fal_total
+        evolucion.append({
+            "etiqueta": "P%s B%s" % (d.get("periodo", "?"), d.get("bloque", "?")),
+            "fecha": (d.get("fecha") or "")[:10],
+            "pct": round(100 * ok_total / tot) if tot else 0,
+            "faltantes": fal_total,
+        })
+        for doc, datos in (d.get("por_docente") or {}).items():
+            m = docentes.setdefault(doc, {"hechas": 0, "faltantes": 0, "detalle": []})
+            m["hechas"] += len(datos.get("completos") or [])
+            for item in (datos.get("faltantes") or []):
+                m["faltantes"] += 1
+                m["detalle"].append({
+                    "item": item,
+                    "bloque": "P%s B%s" % (d.get("periodo", "?"), d.get("bloque", "?")),
+                })
+
+    ranking = []
+    for doc, m in docentes.items():
+        total = m["hechas"] + m["faltantes"]
+        ranking.append({
+            "docente": doc,
+            "hechas": m["hechas"],
+            "faltantes": m["faltantes"],
+            "total": total,
+            "pct": round(100 * m["hechas"] / total) if total else 0,
+            "detalle": m["detalle"][:20],
+        })
+    # Pendientes primero (mas faltantes arriba); al dia despues, por nombre
+    ranking.sort(key=lambda x: (x["faltantes"] == 0, -x["faltantes"], x["docente"]))
+
+    periodos = sorted({str(d.get("periodo")) for d in _reportes_unicos()} - {"None", ""})
+    return {"ranking": ranking, "evolucion": evolucion,
+            "verificaciones": len(reportes), "periodos": periodos}
 
 
 def _login_automatico(driver, nombre, log):
@@ -3085,13 +2955,14 @@ def coordinador_informe():
         return jsonify({"ok": False, "error": str(e)[:150]})
 
 
-@app.route("/api/coordinador/cuadricula")
-def coordinador_cuadricula():
+@app.route("/api/coordinador/historial")
+def coordinador_historial():
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
     if not cargar_perfiles().get(nombre, {}).get("es_coordinador", False):
         return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
-    return jsonify({"ok": True, **_cuadricula()})
+    periodo = request.args.get("periodo") or None
+    return jsonify({"ok": True, **_historial(periodo)})
 
 
 # ─────────────────────────────────────────────
