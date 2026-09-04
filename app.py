@@ -7,6 +7,7 @@ Luego abre: http://127.0.0.1:8080
 
 import os
 import json
+import hmac
 import hashlib
 import atexit
 import webbrowser
@@ -195,7 +196,25 @@ def _crear_driver_chrome():
 
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "cambia-esta-clave-en-produccion")
+
+# Valor de respaldo cuando SECRET_KEY no esta en el entorno. Esta a la vista en
+# el repo publico: con el, cualquiera puede firmar una sesion de administrador y
+# descifrar las credenciales del colegio (get_fernet la deriva). En produccion
+# SECRET_KEY tiene que venir de las variables de entorno de Coolify.
+SECRET_KEY_POR_DEFECTO = "cambia-esta-clave-en-produccion"
+SECRET_KEY_ACTUAL      = os.environ.get("SECRET_KEY", SECRET_KEY_POR_DEFECTO)
+SECRET_KEY_INSEGURA    = (SECRET_KEY_ACTUAL == SECRET_KEY_POR_DEFECTO)
+
+app.secret_key = SECRET_KEY_ACTUAL
+
+if SECRET_KEY_INSEGURA:
+    print("=" * 70, flush=True)
+    print("[!!] SECRET_KEY NO CONFIGURADA — usando el valor por defecto del repo.", flush=True)
+    print("     Las sesiones se pueden falsificar y las credenciales del colegio", flush=True)
+    print("     se pueden descifrar. Configurala en Coolify > Variables de entorno.", flush=True)
+    print("=" * 70, flush=True)
+if not os.environ.get("ADMIN_KEY", ""):
+    print("[!] ADMIN_KEY no configurada: el rescate de administrador esta desactivado.", flush=True)
 
 # ── Seguridad de sesión ───────────────────────
 app.config['SESSION_COOKIE_SAMESITE']    = 'Lax'
@@ -303,6 +322,9 @@ def guardar_config_global(data):
 def get_fernet():
     """Devuelve instancia de Fernet usando SECRET_KEY como base."""
     import base64, hashlib
+    # OJO: el valor de respaldo tiene que seguir siendo este y no
+    # SECRET_KEY_POR_DEFECTO. Cambiarlo re-derivaria la clave Fernet y dejaria
+    # ilegibles las credenciales del colegio ya guardadas sin tocar Coolify.
     key = os.environ.get("SECRET_KEY", "clave-default-cambiar")
     # Derivar clave de 32 bytes en base64 url-safe
     key_bytes = hashlib.sha256(key.encode()).digest()
@@ -458,14 +480,36 @@ def es_admin(nombre):
 
 
 def puede_planear(nombre):
-    """Por defecto todos pueden planear; el admin lo puede revocar."""
-    return cargar_perfiles().get(nombre, {}).get("puede_planear", True)
+    """Quien puede entrar al modulo de profesor.
+
+    Un coordinador no planea: el menu lateral ya le oculta esas pantallas
+    (layout.html), y aqui se bloquea tambien por servidor para que escribir
+    /planear en la barra no sirva de nada. El admin puede ademas revocar el
+    permiso a cualquier profesor con el interruptor de /admin/perfiles.
+    """
+    perfil = cargar_perfiles().get(nombre, {})
+    if perfil.get("es_coordinador", False):
+        return False
+    return perfil.get("puede_planear", True)
 
 
 def exigir_admin():
     """Devuelve el nombre si es admin, o None. Para usar en las rutas."""
     nombre = usuario_actual()
     return nombre if nombre and es_admin(nombre) else None
+
+
+def clave_admin_valida(clave):
+    """Compara la ADMIN_KEY en tiempo constante.
+
+    Con != el tiempo de respuesta filtra cuantos caracteres acerto quien
+    adivina; compare_digest no. Si la variable no esta configurada, ninguna
+    clave es valida.
+    """
+    esperada = os.environ.get("ADMIN_KEY", "")
+    if not esperada or not clave:
+        return False
+    return hmac.compare_digest(str(clave), esperada)
 
 # ─────────────────────────────────────────────
 # RUTAS — AUTENTICACIÓN
@@ -543,12 +587,13 @@ def registro():
     return jsonify({"ok": True})
 
 @app.route("/api/admin/debug_api_key")
+@limiter.limit("10 per hour")
 def debug_api_key():
     """Diagnostico temporal: muestra de donde sale la key y su longitud/prefijo,
-    sin exponerla completa. Requiere ?clave=ADMIN_KEY."""
-    clave_admin = request.args.get("clave", "")
-    CLAVE_ADMIN = os.environ.get("ADMIN_KEY", "")
-    if not CLAVE_ADMIN or clave_admin != CLAVE_ADMIN:
+    sin exponerla completa. Requiere sesion de admin Y ?clave=ADMIN_KEY."""
+    nombre = exigir_admin()
+    if not nombre or not clave_admin_valida(request.args.get("clave", "")):
+        log_auditoria("DEBUG_API_KEY_DENEGADO", nombre or "anonimo")
         return jsonify({"ok": False, "error": "No autorizado"}), 403
     config = cargar_config()
     key_config = config.get("api_key", "")
@@ -568,9 +613,13 @@ def debug_api_key():
     })
 
 @app.route("/api/admin/capturas")
+@limiter.limit("30 per hour")
 def admin_listar_capturas():
-    """Lista las capturas de diagnostico de Selenium. Requiere ?clave=ADMIN_KEY."""
-    if request.args.get("clave", "") != os.environ.get("ADMIN_KEY", "") or not os.environ.get("ADMIN_KEY", ""):
+    """Lista las capturas de diagnostico de Selenium.
+    Requiere sesion de admin Y ?clave=ADMIN_KEY."""
+    nombre = exigir_admin()
+    if not nombre or not clave_admin_valida(request.args.get("clave", "")):
+        log_auditoria("CAPTURAS_DENEGADO", nombre or "anonimo")
         return jsonify({"ok": False, "error": "No autorizado"}), 403
     try:
         archivos = sorted(os.listdir(CARPETA_DEBUG), reverse=True)
@@ -580,9 +629,12 @@ def admin_listar_capturas():
 
 
 @app.route("/api/admin/captura/<nombre>")
+@limiter.limit("60 per hour")
 def admin_ver_captura(nombre):
-    """Descarga una captura puntual. Requiere ?clave=ADMIN_KEY."""
-    if request.args.get("clave", "") != os.environ.get("ADMIN_KEY", "") or not os.environ.get("ADMIN_KEY", ""):
+    """Descarga una captura puntual.
+    Requiere sesion de admin Y ?clave=ADMIN_KEY. Las capturas pueden contener
+    la pantalla de la plataforma con datos del colegio, asi que no basta la clave."""
+    if not exigir_admin() or not clave_admin_valida(request.args.get("clave", "")):
         return jsonify({"ok": False, "error": "No autorizado"}), 403
     seguro = os.path.basename(nombre)
     ruta = os.path.join(CARPETA_DEBUG, seguro)
@@ -608,7 +660,7 @@ def admin_configurar():
     if not CLAVE_ADMIN:
         return jsonify({"ok": False, "error": "ADMIN_KEY no configurada en .env"})
 
-    if clave_admin != CLAVE_ADMIN:
+    if not clave_admin_valida(clave_admin):
         return jsonify({"ok": False, "error": "Clave de administrador incorrecta"})
     if not api_key:
         return jsonify({"ok": False, "error": "API key vacía"})
@@ -616,6 +668,32 @@ def admin_configurar():
     guardar_config_global({"api_key": api_key, "proveedor": proveedor})
     log_auditoria("ADMIN_CONFIG", "admin", f"proveedor={proveedor}")
     return jsonify({"ok": True})
+
+@app.route("/api/admin/salud_seguridad")
+@limiter.limit("30 per hour")
+def admin_salud_seguridad():
+    """Estado de la configuracion de seguridad del servidor — solo admin.
+
+    Sirve para comprobar desde el navegador, sin entrar al VPS, si Coolify tiene
+    puestas SECRET_KEY y ADMIN_KEY y si la app ya va por HTTPS. Devuelve solo
+    banderas: nunca el valor de una clave.
+    """
+    if not exigir_admin():
+        return jsonify({"ok": False, "error": "No autorizado"}), 403
+    https = request.is_secure or request.headers.get("X-Forwarded-Proto", "") == "https"
+    checks = {
+        "secret_key_configurada":  not SECRET_KEY_INSEGURA,
+        "admin_key_configurada":   bool(os.environ.get("ADMIN_KEY", "")),
+        "https_activo":            https,
+        "cookie_secure":           bool(app.config.get("SESSION_COOKIE_SECURE")),
+        "cookie_httponly":         bool(app.config.get("SESSION_COOKIE_HTTPONLY")),
+        "csrf_activo":             CSRF_OK,
+        "rate_limit_activo":       LIMITER_OK,
+    }
+    pendientes = [k for k, v in checks.items() if not v]
+    return jsonify({"ok": True, "checks": checks, "pendientes": pendientes,
+                    "todo_bien": not pendientes})
+
 
 @app.route("/api/admin/estado")
 def admin_estado():
@@ -680,6 +758,7 @@ def materias():
 def agregar_materia():
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
     data     = get_json_safe()
     nom_mat  = sanitize(data.get("nombre", ""), "nombre")
     codigo   = sanitize(data.get("codigo", ""), "codigo")
@@ -709,6 +788,7 @@ def agregar_materia():
 def editar_cursos():
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
     data   = get_json_safe()
     key    = sanitize(str(data.get("key", "")), "codigo")
     cursos = sanitize_list(data.get("cursos", []), "codigo")
@@ -724,6 +804,7 @@ def editar_cursos():
 def editar_recursos():
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
     data     = get_json_safe()
     key      = sanitize(str(data.get("key", "")), "codigo")
     recursos = sanitize(data.get("recursos", ""), "textarea")
@@ -754,6 +835,7 @@ def periodos():
 def guardar_periodo():
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
     data       = get_json_safe()
     mat_nombre = sanitize(data.get("materia", ""), "nombre")
     num_per    = sanitize(str(data.get("periodo", "1")), "año")[:1]
@@ -787,6 +869,7 @@ def guardar_periodo():
 def obtener_periodos():
     nombre   = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
     materia  = request.args.get("materia", "")
     perfiles = cargar_perfiles()
     mem      = cargar_memoria(nombre, materia)
@@ -836,6 +919,7 @@ def onboarding_estado():
     para esta materia en el año activo."""
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
     perfiles   = cargar_perfiles()
     mat_nombre = sanitize(request.args.get("materia", ""), "nombre")
     if not mat_nombre:
@@ -855,6 +939,7 @@ def chat_inicio():
     """
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
 
     data       = get_json_safe()
     mat_nombre = sanitize(data.get("materia", ""), "nombre")
@@ -941,6 +1026,7 @@ Una pregunta a la vez. Máximo 2 líneas. Tono de colega."""
 def chat():
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
 
     data       = get_json_safe()
     mensaje    = str(data.get("mensaje", "")).strip()[:2000]
@@ -1053,6 +1139,7 @@ def generar_grupo():
     """Genera título y actividades para un grupo de cursos."""
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
 
     data         = get_json_safe()
     ideas        = sanitize(data.get("ideas", ""), "textarea")
@@ -1261,6 +1348,7 @@ Reglas estrictas: verbo infinitivo, max 6 palabras por actividad, semana {s1} in
 def obtener_estilo():
     nombre    = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
     mat_nombre = request.args.get("materia", "")
     mem        = cargar_memoria(nombre, mat_nombre)
     return jsonify({"ok": True, "estilo": mem.get("estilo", ""), "periodos": mem.get("periodos", {})})
@@ -1269,6 +1357,7 @@ def obtener_estilo():
 def guardar_observacion():
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
     data       = get_json_safe()
     mat_nombre = sanitize(data.get("materia", ""), "nombre")
     obs        = sanitize(data.get("observacion", ""), "textarea")
@@ -1392,6 +1481,8 @@ def detectar_materias():
     nombre = usuario_actual()
     if not nombre:
         return jsonify({"ok": False, "error": "No hay sesion activa"})
+    if not puede_planear(nombre):
+        return jsonify({"ok": False, "error": "Sin permiso"}), 403
 
     # Usando constantes globales
 
@@ -1520,6 +1611,7 @@ def detectar_materias():
 def estructura():
     nombre = usuario_actual()
     if not nombre: return redirect(url_for("index"))
+    if not puede_planear(nombre): return redirect(url_for("dashboard"))
     perfiles = cargar_perfiles()
     mats     = get_materias(perfiles, nombre)
     año      = get_año(perfiles, nombre)
@@ -1532,6 +1624,7 @@ def guardar_estructura():
     """Guarda la estructura de clase de una materia en su memoria."""
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
 
     data       = get_json_safe()
     mat_nombre = sanitize(data.get("materia", ""), "nombre")
@@ -1563,6 +1656,7 @@ def guardar_estructura():
 def borrar_estilo():
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
     data       = get_json_safe()
     mat_nombre = sanitize(data.get("materia", ""), "nombre")
     mem        = cargar_memoria(nombre, mat_nombre)
@@ -1575,6 +1669,7 @@ def borrar_estilo():
 def obtener_estructura():
     nombre    = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
     mat_nombre = sanitize(request.args.get("materia", ""), "nombre")
     mem        = cargar_memoria(nombre, mat_nombre)
     return jsonify({"ok": True, "estructura": mem.get("estructura", {})})
@@ -1609,6 +1704,8 @@ def enviar_plataforma():
     nombre = usuario_actual()
     if not nombre:
         return jsonify({"ok": False, "error": "No hay sesión activa"})
+    if not puede_planear(nombre):
+        return jsonify({"ok": False, "error": "Sin permiso"}), 403
 
     data      = get_json_safe()
     grupos    = data.get("grupos", [])      # [{cursos:[...], titulo:"", actividades:"", recursos:""}]
@@ -2160,6 +2257,7 @@ def agente_interpretar():
     """
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
 
     data        = get_json_safe()
     # Usar password para no escapar URLs ni caracteres especiales
@@ -2272,6 +2370,7 @@ def agente_ejecutar():
 
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
 
     data   = get_json_safe()
     tareas = data.get("tareas", [])
@@ -2833,10 +2932,18 @@ def admin_eliminar_perfil(usuario):
 
 
 @app.route("/api/admin/promover")
+@limiter.limit("5 per hour")
 def admin_promover():
-    """Crea el primer administrador usando la ADMIN_KEY del servidor."""
-    clave_admin = os.environ.get("ADMIN_KEY", "")
-    if not clave_admin or request.args.get("clave", "") != clave_admin:
+    """Crea el primer administrador usando la ADMIN_KEY del servidor.
+
+    Es el unico camino de rescate cuando nadie puede entrar como admin, asi que
+    concede el rol mas alto de la app: va con limite de intentos y comparacion
+    en tiempo constante para que la clave no se pueda adivinar por fuerza bruta.
+    """
+    if not clave_admin_valida(request.args.get("clave", "")):
+        log_auditoria("ADMIN_PROMOVER_DENEGADO",
+                      sanitize(request.args.get("usuario", ""), "nombre") or "?",
+                      "clave incorrecta")
         return jsonify({"ok": False, "error": "Clave inválida"})
     usuario = sanitize(request.args.get("usuario", ""), "nombre")
     perfiles = cargar_perfiles()
@@ -3203,9 +3310,7 @@ def ver_audit_log():
     """Muestra los últimos 100 eventos de auditoría — solo admin."""
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
-    clave  = request.args.get("clave", "")
-    CLAVE_ADMIN = os.environ.get("ADMIN_KEY", "")
-    if not CLAVE_ADMIN or clave != CLAVE_ADMIN:
+    if not clave_admin_valida(request.args.get("clave", "")):
         log_auditoria("AUDIT_LOG_ACCESO_DENEGADO", nombre)
         return jsonify({"ok": False, "error": "No autorizado"}), 403
     ruta_log = os.path.join(CARPETA_DATOS, "audit.log")
