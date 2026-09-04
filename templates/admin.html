@@ -26,6 +26,8 @@
       <p class="text-xs text-on-surface-variant mt-xl leading-relaxed">
         Bloquear cierra la sesión de esa persona de inmediato y le impide volver a entrar.
         Quitar «Puede planear» deja el perfil activo pero sin acceso a planeación ni al agente.
+        Eliminar borra el perfil y sus planeaciones guardadas de forma permanente; si solo quieres
+        cortarle el acceso, usa «Bloqueado».
       </p>
 
     </section>
@@ -64,6 +66,8 @@ async function cargarPerfiles() {
             ${chip(p.nombre, 'es_coordinador', p.es_coordinador, 'Coordinación')}
             ${chip(p.nombre, 'puede_planear',  p.puede_planear,  'Puede planear')}
             ${esYo ? '' : chip(p.nombre, 'bloqueado', p.bloqueado, 'Bloqueado', true)}
+            ${esYo ? '' : `<button class="text-xs px-md py-xs rounded-full border border-outline-variant/40 text-on-surface-variant hover:text-error hover:border-error/40 transition-colors"
+              onclick="eliminarPerfil('${p.nombre}')">Eliminar</button>`}
           </div>
         </div>`;
     }).join('');
@@ -80,6 +84,20 @@ function chip(usuario, campo, activo, texto, peligro) {
   const off  = 'border-outline-variant/40 text-on-surface-variant';
   return `<button class="${base} ${activo ? on : off}"
     onclick="cambiar('${usuario}','${campo}',${!activo})">${texto}</button>`;
+}
+
+async function eliminarPerfil(usuario) {
+  const escrito = prompt('Esto elimina el perfil "' + usuario + '" y todas sus planeaciones guardadas. No se puede deshacer.\n\nEscribe el nombre exacto para confirmar:');
+  if (escrito !== usuario) {
+    if (escrito !== null) alert('El nombre no coincide. No se eliminó nada.');
+    return;
+  }
+  try {
+    const r = await fetch('/api/admin/perfil/' + encodeURIComponent(usuario) + '/eliminar', {method: 'POST'});
+    const d = await r.json();
+    if (!d.ok) { alert(d.error || 'No se pudo eliminar'); return; }
+    cargarPerfiles();
+  } catch (e) { alert('Error de conexión'); }
 }
 
 async function cambiar(usuario, campo, valor) {

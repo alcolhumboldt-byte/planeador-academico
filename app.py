@@ -2804,6 +2804,36 @@ def admin_cambiar_perfil(usuario):
     return jsonify({"ok": True})
 
 
+@app.route("/api/admin/perfil/<usuario>/eliminar", methods=["POST"])
+def admin_eliminar_perfil(usuario):
+    nombre = exigir_admin()
+    if not nombre:
+        return jsonify({"ok": False, "error": "Solo administradores"})
+
+    perfiles = cargar_perfiles()
+    usuario = sanitize(usuario, "nombre")
+    if usuario not in perfiles:
+        return jsonify({"ok": False, "error": "Perfil no encontrado"})
+    if usuario == nombre:
+        return jsonify({"ok": False, "error": "No puedes eliminar tu propio perfil"})
+
+    # Borrar tambien los archivos de memoria de ese profesor
+    borrados = 0
+    prefijo = "mem_" + usuario.lower().replace(" ", "_") + "_"
+    try:
+        for arch in os.listdir(CARPETA_DATOS):
+            if arch.startswith(prefijo) and arch.endswith(".json"):
+                os.remove(os.path.join(CARPETA_DATOS, arch))
+                borrados += 1
+    except Exception:
+        pass
+
+    del perfiles[usuario]
+    guardar_perfiles(perfiles)
+    log_auditoria("ADMIN_PERFIL_ELIMINADO", nombre, f"{usuario} (+{borrados} memorias)")
+    return jsonify({"ok": True, "memorias": borrados})
+
+
 @app.route("/api/admin/promover")
 def admin_promover():
     """Crea el primer administrador usando la ADMIN_KEY del servidor."""
