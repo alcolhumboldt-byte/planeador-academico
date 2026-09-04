@@ -2793,10 +2793,8 @@ def admin_cambiar_perfil(usuario):
     if campo not in ("es_coordinador", "puede_planear", "bloqueado", "es_admin"):
         return jsonify({"ok": False, "error": "Campo no permitido"})
 
-    # No dejar que un admin se quite a si mismo el acceso y pierda el panel
-    if usuario == nombre and campo in ("bloqueado", "es_admin"):
-        return jsonify({"ok": False,
-                        "error": "No puedes cambiar eso en tu propio perfil"})
+    # Se permite aplicarselos a uno mismo para poder probarlos: el endpoint
+    # /api/admin/promover con la ADMIN_KEY siempre restaura el acceso.
 
     perfiles[usuario][campo] = valor
     guardar_perfiles(perfiles)
@@ -2844,10 +2842,13 @@ def admin_promover():
     perfiles = cargar_perfiles()
     if usuario not in perfiles:
         return jsonify({"ok": False, "error": "Perfil no encontrado"})
-    perfiles[usuario]["es_admin"] = True
+    perfiles[usuario]["es_admin"]      = True
+    perfiles[usuario]["bloqueado"]     = False
+    perfiles[usuario]["puede_planear"] = True
     guardar_perfiles(perfiles)
     log_auditoria("ADMIN_PROMOVER", usuario, "via ADMIN_KEY")
-    return jsonify({"ok": True, "mensaje": f"{usuario} ahora es administrador"})
+    return jsonify({"ok": True,
+                    "mensaje": f"{usuario} es administrador, está desbloqueado y puede planear"})
 
 
 @app.route("/coordinador/historial")

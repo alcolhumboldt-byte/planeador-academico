@@ -27,7 +27,9 @@
         Bloquear cierra la sesión de esa persona de inmediato y le impide volver a entrar.
         Quitar «Puede planear» deja el perfil activo pero sin acceso a planeación ni al agente.
         Eliminar borra el perfil y sus planeaciones guardadas de forma permanente; si solo quieres
-        cortarle el acceso, usa «Bloqueado».
+        cortarle el acceso, usa «Bloqueado». Puedes aplicarte los interruptores a ti mismo para
+        probarlos: si pierdes el acceso, se recupera abriendo
+        <span class="text-on-surface">/api/admin/promover?clave=ADMIN_KEY&amp;usuario=TU_NOMBRE</span>.
       </p>
 
     </section>
@@ -65,7 +67,8 @@ async function cargarPerfiles() {
           <div class="flex flex-wrap gap-sm">
             ${chip(p.nombre, 'es_coordinador', p.es_coordinador, 'Coordinación')}
             ${chip(p.nombre, 'puede_planear',  p.puede_planear,  'Puede planear')}
-            ${esYo ? '' : chip(p.nombre, 'bloqueado', p.bloqueado, 'Bloqueado', true)}
+            ${chip(p.nombre, 'bloqueado', p.bloqueado, 'Bloqueado', true)}
+            ${chip(p.nombre, 'es_admin', p.es_admin, 'Administrador')}
             ${esYo ? '' : `<button class="text-xs px-md py-xs rounded-full border border-outline-variant/40 text-on-surface-variant hover:text-error hover:border-error/40 transition-colors"
               onclick="eliminarPerfil('${p.nombre}')">Eliminar</button>`}
           </div>
@@ -101,6 +104,12 @@ async function eliminarPerfil(usuario) {
 }
 
 async function cambiar(usuario, campo, valor) {
+  if (usuario === yo && valor && campo === 'bloqueado') {
+    if (!confirm('Te vas a bloquear a ti mismo. Se cerrará tu sesión y no podrás entrar.\n\nPara recuperarte tendrás que abrir /api/admin/promover con la ADMIN_KEY. ¿Continuar?')) return;
+  }
+  if (usuario === yo && !valor && campo === 'es_admin') {
+    if (!confirm('Vas a quitarte el rol de administrador y perderás esta pantalla.\n\nSe recupera con /api/admin/promover y la ADMIN_KEY. ¿Continuar?')) return;
+  }
   try {
     const r = await fetch('/api/admin/perfil/' + encodeURIComponent(usuario), {
       method: 'POST',
