@@ -195,6 +195,126 @@ def _crear_driver_chrome():
     return driver
 
 
+# ─────────────────────────────────────────────
+# COLA DE CHROME
+# ─────────────────────────────────────────────
+# Cada planeacion abre un Chromium headless que pesa 400-700 MB. El VPS aguanta
+# unos pocos a la vez; pasado ese punto el kernel mata un proceso a medias y el
+# profesor ve un error raro despues de haber esperado varios minutos. Mejor
+# hacer la fila explicita: uno entra, los demas esperan y ven su turno.
+MAX_CHROMES = max(1, int(os.environ.get("MAX_CHROMES", "1") or 1))
+
+# Un turno abandonado no puede bloquear la fila para siempre. El TTL cuenta
+# SILENCIO, no duracion: renovar_turno() lo reinicia cada vez que la tanda
+# escribe en el log de progreso. Asi una verificacion de 34 docentes que tarda
+# media hora nunca se da por muerta, pero un Chrome que quedo abierto porque el
+# profesor cerro la pestana se recupera en 15 minutos.
+TTL_TURNO = max(300, int(os.environ.get("TTL_TURNO", "900") or 900))
+
+_cola_cv     = threading.Condition()
+_turnos      = {}    # session_id -> momento en que tomo el turno
+_cola_espera = []    # session_ids esperando, en orden de llegada
+
+
+def _recuperar_turnos_vencidos():
+    """Solo con _cola_cv tomado. Suelta turnos que pasaron el TTL."""
+    ahora = time.time()
+    for sid, t0 in list(_turnos.items()):
+        if ahora - t0 <= TTL_TURNO:
+            continue
+        _turnos.pop(sid, None)
+        # El Chrome del turno perdido sigue comiendo RAM: cerrarlo tambien.
+        driver = _drivers_activos.pop(sid, None)
+        if driver:
+            try: driver.quit()
+            except Exception: pass
+
+
+def tomar_turno(session_id, log=None, espera_max=900):
+    """Espera turno para abrir Chrome. Devuelve True si lo consiguio.
+
+    Es idempotente: si esta sesion ya tiene turno (esta reutilizando un Chrome
+    abierto entre materias) devuelve True sin gastar otro cupo.
+
+    log es la funcion de progreso de quien llama, para que el profesor vea en
+    pantalla cuantos tiene delante en vez de mirar una barra quieta.
+    """
+    limite    = time.time() + espera_max
+    anunciado = None
+    with _cola_cv:
+        if session_id in _turnos:
+            _turnos[session_id] = time.time()   # renovar el TTL
+            return True
+        if session_id not in _cola_espera:
+            _cola_espera.append(session_id)
+        try:
+            while True:
+                _recuperar_turnos_vencidos()
+                if len(_turnos) < MAX_CHROMES and _cola_espera[0] == session_id:
+                    _cola_espera.pop(0)
+                    _turnos[session_id] = time.time()
+                    _cola_cv.notify_all()
+                    return True
+
+                delante = len(_turnos) + _cola_espera.index(session_id)
+                if log and delante != anunciado:
+                    anunciado = delante
+                    if delante <= 1:
+                        log("info", "Otro profesor esta usando el navegador. Esperando turno...")
+                    else:
+                        log("info", f"En cola: {delante} adelante. Esperando turno...")
+
+                restante = limite - time.time()
+                if restante <= 0:
+                    if log:
+                        log("error", "El servidor sigue ocupado. Intenta de nuevo en unos minutos.")
+                    return False
+                _cola_cv.wait(min(5, restante))
+        finally:
+            # Si se sale sin turno (timeout o excepcion), no dejar rastro en la fila.
+            if session_id not in _turnos and session_id in _cola_espera:
+                _cola_espera.remove(session_id)
+                _cola_cv.notify_all()
+
+
+def renovar_turno(session_id):
+    """Marca el turno como vivo. Lo llaman los logs de progreso: mientras una
+    tanda siga reportando avance no se la puede dar por abandonada."""
+    with _cola_cv:
+        if session_id in _turnos:
+            _turnos[session_id] = time.time()
+
+
+def transferir_turno(viejo, nuevo):
+    """Pasa el turno a otro session_id sin soltar el cupo.
+
+    Al planear una segunda materia se reutiliza el Chrome ya abierto pero con
+    un session_id nuevo; soltar y volver a pedir dejaria colarse a otro
+    profesor mientras ese Chrome sigue vivo.
+    """
+    with _cola_cv:
+        if viejo not in _turnos:
+            return False
+        _turnos.pop(viejo, None)
+        _turnos[nuevo] = time.time()
+        return True
+
+
+def soltar_turno(session_id):
+    """Devuelve el turno. Seguro de llamar dos veces o sin tenerlo."""
+    with _cola_cv:
+        _turnos.pop(session_id, None)
+        if session_id in _cola_espera:
+            _cola_espera.remove(session_id)
+        _cola_cv.notify_all()
+
+
+def estado_cola():
+    with _cola_cv:
+        _recuperar_turnos_vencidos()
+        return {"max": MAX_CHROMES, "en_uso": len(_turnos), "esperando": len(_cola_espera)}
+
+
 app = Flask(__name__)
 
 # Valor de respaldo cuando SECRET_KEY no esta en el entorno. Esta a la vista en
@@ -382,6 +502,10 @@ def _limpiar_al_salir():
         try: driver.quit()
         except: pass
     _drivers_activos.clear()
+    with _cola_cv:
+        _turnos.clear()
+        _cola_espera.clear()
+        _cola_cv.notify_all()
 
 atexit.register(_limpiar_al_salir)
 def enc(pw):
@@ -693,6 +817,16 @@ def admin_salud_seguridad():
     pendientes = [k for k, v in checks.items() if not v]
     return jsonify({"ok": True, "checks": checks, "pendientes": pendientes,
                     "todo_bien": not pendientes})
+
+
+@app.route("/api/admin/cola")
+@limiter.limit("60 per hour")
+def admin_cola():
+    """Cuantos Chrome hay abiertos y cuantos esperando — solo admin.
+    Sirve para saber si la app va lenta por la cola o por otra cosa."""
+    if not exigir_admin():
+        return jsonify({"ok": False, "error": "No autorizado"}), 403
+    return jsonify({"ok": True, **estado_cola()})
 
 
 @app.route("/api/admin/estado")
@@ -1486,7 +1620,21 @@ def detectar_materias():
 
     # Usando constantes globales
 
+    # Turno por profesor: si vuelve a pulsar Detectar no hace dos filas.
+    turno_det = "det-" + hashlib.sha1(nombre.encode()).hexdigest()[:8]
+
     def hacer_barrido():
+        # Espera acotada: esta llamada ocupa un hilo de gunicorn (son 8), asi que
+        # no puede quedarse esperando indefinidamente o tumba la app entera.
+        if not tomar_turno(turno_det, espera_max=150):
+            return {"ok": False, "materias": [], "cursos_plataforma": [],
+                    "error": "El servidor está ocupado con otra planeación. Intenta en unos minutos."}
+        try:
+            return _barrido_con_chrome()
+        finally:
+            soltar_turno(turno_det)
+
+    def _barrido_con_chrome():
         driver = _crear_driver_chrome()
 
         resultado = {"ok": False, "error": "", "materias": [], "cursos_plataforma": []}
@@ -1687,6 +1835,9 @@ def _log_progreso(session_id, tipo, mensaje):
     if session_id not in _progreso_sesiones:
         _progreso_sesiones[session_id] = []
     _progreso_sesiones[session_id].append({"tipo": tipo, "msg": mensaje})
+    # Escribir avance cuenta como senal de vida: renueva el turno de la cola
+    # para que una tanda larga no se de por abandonada.
+    renovar_turno(session_id)
 
 
 @app.route("/api/enviar_plataforma", methods=["POST"])
@@ -1735,8 +1886,16 @@ def enviar_plataforma():
 
         if driver_prev:
             driver = driver_prev
+            # El Chrome reutilizado ya ocupa un cupo: heredarlo, no pedir otro.
+            if not transferir_turno(driver_existente, session_id):
+                if not tomar_turno(session_id, log):
+                    try: driver_prev.quit()
+                    except Exception: pass
+                    return
             log("info", "Reutilizando Chrome abierto — continuando con nueva materia")
         else:
+            if not tomar_turno(session_id, log):
+                return
             driver = _crear_driver_chrome()
 
             try:
@@ -2185,6 +2344,7 @@ def enviar_plataforma():
                 driver.quit()
                 _drivers_activos.pop(session_id, None)
             except: pass
+            soltar_turno(session_id)
 
     # Correr en hilo separado
     t = threading.Thread(target=correr_selenium, daemon=True)
@@ -2201,6 +2361,7 @@ def cerrar_chrome(session_id):
     if driver:
         try: driver.quit()
         except: pass
+    soltar_turno(session_id)
     _progreso_sesiones.pop(session_id, None)
     return jsonify({"ok": True})
 
@@ -2385,6 +2546,9 @@ def agente_ejecutar():
 
     def log(tipo, msg):
         _agente_sesiones[session_id].append({"tipo": tipo, "msg": msg})
+        # Escribir avance cuenta como senal de vida: renueva el turno de la
+        # cola para que una tanda larga no se de por abandonada.
+        renovar_turno(session_id)
 
     def correr():
         # Reutilizar Chrome si existe
@@ -2392,8 +2556,15 @@ def agente_ejecutar():
 
         if driver_prev:
             driver = driver_prev
+            if not transferir_turno(sid_anterior, session_id):
+                if not tomar_turno(session_id, log):
+                    try: driver_prev.quit()
+                    except Exception: pass
+                    return
             log("info", "Reutilizando Chrome abierto")
         else:
+            if not tomar_turno(session_id, log):
+                return
             try:
                 driver = _crear_driver_chrome()
                 time.sleep(2)
@@ -2401,6 +2572,7 @@ def agente_ejecutar():
                 time.sleep(3)
             except Exception as e:
                 log("error", f"Error abriendo Chrome: {str(e)}")
+                soltar_turno(session_id)
                 return
 
             # Intentar login automático si hay credenciales guardadas
@@ -2507,6 +2679,8 @@ def agente_ejecutar():
             log("error", f"Error: {str(e)}")
             try: driver.quit()
             except: pass
+            _drivers_activos.pop(session_id, None)
+            soltar_turno(session_id)
 
     threading.Thread(target=correr, daemon=True).start()
     return jsonify({"ok": True, "session_id": session_id})
@@ -3010,12 +3184,23 @@ def verificar_planeaciones():
 
     def log(tipo, msg):
         _reporte_sesiones[session_id]["logs"].append({"tipo": tipo, "msg": msg})
+        # Escribir avance cuenta como senal de vida: renueva el turno de la
+        # cola para que una tanda larga no se de por abandonada.
+        renovar_turno(session_id)
 
     perfiles_data = cargar_perfiles()
     usuario_enc  = perfiles_data[nombre].get("colegio_usuario", "")
     password_enc = perfiles_data[nombre].get("colegio_password", "")
 
     def correr_verificacion():
+        if not tomar_turno(session_id, log):
+            return
+        try:
+            _verificacion_con_chrome()
+        finally:
+            soltar_turno(session_id)
+
+    def _verificacion_con_chrome():
         driver = _crear_driver_chrome()
 
         try:
@@ -3286,6 +3471,10 @@ def apagar_emergencia():
         try: driver.quit()
         except: pass
     _drivers_activos.clear()
+    with _cola_cv:
+        _turnos.clear()
+        _cola_espera.clear()
+        _cola_cv.notify_all()
     _progreso_sesiones.clear()
     _agente_sesiones.clear()
 
