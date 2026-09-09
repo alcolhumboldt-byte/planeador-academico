@@ -456,6 +456,19 @@ def cargar_config():
         with open(RUTA_CONFIG, encoding="utf-8") as f: return json.load(f)
     except: return {}
 
+def actualizar_config_global(cambios):
+    """Escribe solo las claves indicadas y deja el resto del config intacto.
+
+    guardar_config_global reemplaza el archivo entero: usarla para un campo
+    suelto borra los demas. Guardar la API key llegaria a borrar la cuenta de
+    coordinacion sin que nadie lo notara.
+    """
+    cfg = cargar_config()
+    cfg.update(cambios)
+    guardar_config_global(cfg)
+    return cfg
+
+
 def guardar_config_global(data):
     os.makedirs(os.path.dirname(RUTA_CONFIG), exist_ok=True)
     with open(RUTA_CONFIG, "w", encoding="utf-8") as f:
@@ -827,7 +840,7 @@ def admin_configurar():
     if not api_key:
         return jsonify({"ok": False, "error": "API key vacía"})
 
-    guardar_config_global({"api_key": api_key, "proveedor": proveedor})
+    actualizar_config_global({"api_key": api_key, "proveedor": proveedor})
     log_auditoria("ADMIN_CONFIG", "admin", f"proveedor={proveedor}")
     return jsonify({"ok": True})
 
@@ -855,6 +868,45 @@ def admin_salud_seguridad():
     pendientes = [k for k, v in checks.items() if not v]
     return jsonify({"ok": True, "checks": checks, "pendientes": pendientes,
                     "todo_bien": not pendientes})
+
+
+@app.route("/api/admin/credenciales_coordinacion", methods=["GET", "POST"])
+@limiter.limit("20 per hour")
+def admin_credenciales_coordinacion():
+    """Cuenta de la plataforma que usa el reporte de coordinacion — solo admin.
+
+    Va aparte de las credenciales de cada profesor a proposito: el reporte
+    necesita una cuenta que vea a los 34 docentes, y la de profesor de quien
+    corre el reporte solo se ve a si misma.
+
+    El GET nunca devuelve la contrasena, solo el usuario y si esta puesta.
+    """
+    nombre = exigir_admin()
+    if not nombre:
+        return jsonify({"ok": False, "error": "No autorizado"}), 403
+
+    if request.method == "GET":
+        usuario, password = _credenciales_coordinacion()
+        return jsonify({"ok": True, "configurada": bool(usuario), "usuario": usuario or ""})
+
+    data     = get_json_safe()
+    usuario  = sanitize(data.get("usuario", ""), "text")
+    password = str(data.get("password", "")).strip()[:100]
+
+    if data.get("borrar"):
+        actualizar_config_global({"coord_usuario": "", "coord_password": ""})
+        log_auditoria("COORD_CREDENCIALES_BORRADAS", nombre)
+        return jsonify({"ok": True, "configurada": False})
+
+    if not usuario or not password:
+        return jsonify({"ok": False, "error": "Usuario y contraseña requeridos"})
+
+    actualizar_config_global({
+        "coord_usuario":  encriptar_credencial(usuario),
+        "coord_password": encriptar_credencial(password),
+    })
+    log_auditoria("COORD_CREDENCIALES", nombre, f"cuenta plataforma={usuario}")
+    return jsonify({"ok": True, "configurada": True, "usuario": usuario})
 
 
 @app.route("/api/admin/cola")
@@ -3181,20 +3233,46 @@ def _historial(periodo=None):
 
 
 def _login_automatico(driver, nombre, log):
-    """Hace login automático en la plataforma del colegio."""
+    """Entra a la plataforma con las credenciales propias del usuario."""
     perfiles = cargar_perfiles()
-    usuario_enc  = perfiles[nombre].get("colegio_usuario", "")
-    password_enc = perfiles[nombre].get("colegio_password", "")
-
-    if not usuario_enc or not password_enc:
-        return False
-
-    usuario  = desencriptar_credencial(usuario_enc)
-    password = desencriptar_credencial(password_enc)
-
+    usuario  = desencriptar_credencial(perfiles[nombre].get("colegio_usuario", ""))
+    password = desencriptar_credencial(perfiles[nombre].get("colegio_password", ""))
     if not usuario or not password:
         return False
+    return _login_con(driver, usuario, password, log)
 
+
+def _credenciales_coordinacion():
+    """Cuenta de la plataforma con permisos de coordinacion, o (None, None).
+
+    El reporte necesita ver a los 34 docentes y su planeacion, y eso solo lo
+    permite una cuenta de coordinacion: una cuenta de profesor solo se ve a si
+    misma. Por eso esta credencial es del servidor y no del usuario de la app.
+    """
+    cfg = cargar_config()
+    usuario  = desencriptar_credencial(cfg.get("coord_usuario", ""))
+    password = desencriptar_credencial(cfg.get("coord_password", ""))
+    return (usuario, password) if usuario and password else (None, None)
+
+
+def _login_coordinacion(driver, nombre, log):
+    """Entra a la plataforma para el reporte de coordinacion.
+
+    Usa la cuenta de coordinacion del servidor. Si no hay ninguna configurada
+    cae a las credenciales propias del usuario, que es como funcionaba antes.
+    """
+    usuario, password = _credenciales_coordinacion()
+    if not usuario:
+        log("info", "No hay cuenta de coordinación configurada — se intentará "
+                    "con tus credenciales del colegio")
+        return _login_automatico(driver, nombre, log)
+    log("info", f"Entrando como {usuario} (cuenta de coordinación del servidor)")
+    log_auditoria("COORD_LOGIN", nombre, f"cuenta plataforma={usuario}")
+    return _login_con(driver, usuario, password, log)
+
+
+def _login_con(driver, usuario, password, log):
+    """Rellena y envia el formulario de login de la plataforma."""
     try:
         # Buscar campos de login
         campo_usuario = WebDriverWait(driver, 15).until(
@@ -3223,7 +3301,7 @@ def _login_automatico(driver, nombre, log):
             log("ok", "Login automático exitoso")
             return True
         else:
-            log("warn", "Login automático falló — verifica tus credenciales del colegio")
+            log("warn", "Login automático falló — verifica las credenciales del colegio")
             return False
 
     except Exception as e:
@@ -3565,7 +3643,7 @@ def verificar_planeaciones():
             log("info", "El bot solo leerá datos, no modificará nada")
 
             es_headless = os.environ.get("HEADLESS", "false").lower() == "true"
-            sesion_ok = _login_automatico(driver, nombre, log)
+            sesion_ok = _login_coordinacion(driver, nombre, log)
 
             if not sesion_ok and es_headless:
                 log("error", "Login automático falló y el servidor no permite login manual. "

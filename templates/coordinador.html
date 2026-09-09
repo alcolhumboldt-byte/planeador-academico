@@ -22,6 +22,40 @@
         <p class="text-sm text-on-surface-variant mt-xs">El bot revisa la plataforma del colegio y genera un informe con IA.</p>
       </div>
 
+      <!-- Cuenta de la plataforma (solo admin) -->
+      {% if nav_admin %}
+      <div class="bg-surface-container-lowest rounded-3xl p-xl border border-outline-variant/30 shadow-sm mb-lg">
+        <div class="flex items-start justify-between gap-md mb-md">
+          <div>
+            <h3 class="text-base font-medium text-on-surface">Cuenta de coordinación en la plataforma</h3>
+            <p class="text-sm text-on-surface-variant mt-xs">
+              El reporte necesita una cuenta que vea a todos los docentes. Una cuenta de
+              profesor solo se ve a sí misma, así que no sirve aquí.
+            </p>
+          </div>
+          <span id="estado-coord-cred"
+            class="shrink-0 text-xs rounded-full px-md py-xs bg-surface-container text-on-surface-variant">…</span>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-md">
+          <input id="coord-usuario" type="text" autocomplete="off" placeholder="Usuario del colegio"
+            class="w-full rounded-xl border border-outline-variant py-sm px-md text-sm bg-surface focus:ring-2 focus:ring-primary">
+          <input id="coord-password" type="password" autocomplete="new-password" placeholder="Contraseña"
+            class="w-full rounded-xl border border-outline-variant py-sm px-md text-sm bg-surface focus:ring-2 focus:ring-primary">
+        </div>
+        <div class="flex items-center gap-sm mt-md">
+          <button onclick="guardarCredCoord()"
+            class="bg-primary text-on-primary rounded-xl px-lg py-sm text-sm font-medium hover:opacity-90 transition-opacity">
+            Guardar
+          </button>
+          <button onclick="borrarCredCoord()"
+            class="text-sm text-on-surface-variant hover:text-error transition-colors">
+            Quitar
+          </button>
+          <span id="msg-coord-cred" class="text-xs text-on-surface-variant"></span>
+        </div>
+      </div>
+      {% endif %}
+
       <!-- Configuración -->
       <div id="panel-config" class="bg-surface-container-lowest rounded-3xl p-xl border border-outline-variant/30 shadow-sm mb-lg">
         <h3 class="text-base font-medium text-on-surface mb-lg">Configurar verificación</h3>
@@ -150,6 +184,54 @@
 <script>
 let sessionIdCoord = null;
 let reporteActual  = null;
+
+// ── Cuenta de coordinación en la plataforma (solo admin) ──
+const RUTA_CRED_COORD = '/api/admin/credenciales_coordinacion';
+
+async function estadoCredCoord() {
+  const chip = document.getElementById('estado-coord-cred');
+  if (!chip) return;                       // no es admin: el panel no se renderiza
+  try {
+    const d = await (await fetch(RUTA_CRED_COORD)).json();
+    if (d.ok && d.configurada) {
+      chip.textContent = 'Configurada: ' + d.usuario;
+      chip.className = 'shrink-0 text-xs rounded-full px-md py-xs bg-primary-container text-on-primary-container';
+      document.getElementById('coord-usuario').value = d.usuario;
+    } else {
+      chip.textContent = 'Sin configurar — se usarán tus credenciales';
+      chip.className = 'shrink-0 text-xs rounded-full px-md py-xs bg-surface-container text-on-surface-variant';
+    }
+  } catch (e) { chip.textContent = 'No se pudo consultar'; }
+}
+
+async function guardarCredCoord() {
+  const msg = document.getElementById('msg-coord-cred');
+  const usuario  = document.getElementById('coord-usuario').value.trim();
+  const password = document.getElementById('coord-password').value;
+  if (!usuario || !password) { msg.textContent = 'Faltan usuario o contraseña'; return; }
+  msg.textContent = 'Guardando...';
+  const d = await (await fetch(RUTA_CRED_COORD, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ usuario, password })
+  })).json();
+  document.getElementById('coord-password').value = '';   // no dejarla en pantalla
+  msg.textContent = d.ok ? 'Guardada' : ('Error: ' + (d.error || ''));
+  estadoCredCoord();
+}
+
+async function borrarCredCoord() {
+  const msg = document.getElementById('msg-coord-cred');
+  const d = await (await fetch(RUTA_CRED_COORD, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ borrar: true })
+  })).json();
+  document.getElementById('coord-usuario').value = '';
+  document.getElementById('coord-password').value = '';
+  msg.textContent = d.ok ? 'Quitada' : 'Error';
+  estadoCredCoord();
+}
+
+document.addEventListener('DOMContentLoaded', estadoCredCoord);
 
 async function iniciarVerificacion() {
   const periodo = document.getElementById('sel-periodo').value;
