@@ -1,0 +1,74 @@
+<!-- Rescate de administrador.
+     Plantilla suelta a proposito: se usa cuando nadie puede entrar, asi que no
+     depende de sesion ni del menu lateral. No muestra ningun dato del sistema;
+     solo recoge la ADMIN_KEY por POST para que no viaje en la URL. -->
+<title>Rescate de administrador</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light dark; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center;
+         font:15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+         background:#0A0F1E; color:#E8ECF5; padding:24px; }
+  .caja { width:100%; max-width:380px; }
+  h1 { font-size:19px; margin:0 0 6px; }
+  p.sub { margin:0 0 22px; color:#8A93A8; font-size:13.5px; }
+  label { display:block; font-size:12.5px; color:#8A93A8; margin:14px 0 5px; }
+  input { width:100%; box-sizing:border-box; padding:10px 12px; border-radius:9px;
+          border:1px solid #2A3348; background:#121829; color:#E8ECF5; font-size:14px; }
+  input:focus { outline:none; border-color:#3B6BF5; }
+  button { width:100%; margin-top:18px; padding:11px; border:0; border-radius:9px;
+           background:#3B6BF5; color:#fff; font-size:14px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:default; }
+  #msg { margin-top:14px; font-size:13px; min-height:19px; }
+  .ok  { color:#5BD98A; }
+  .err { color:#FF6B6B; }
+  a { color:#6C8FFF; font-size:13px; text-decoration:none; }
+</style>
+
+<div class="caja">
+  <h1>Rescate de administrador</h1>
+  <p class="sub">Devuelve el rol de administrador a un perfil, lo desbloquea y le
+     restaura el permiso de planear.</p>
+
+  <form id="f" autocomplete="off">
+    <label for="usuario">Nombre del perfil</label>
+    <input id="usuario" name="usuario" type="text" required>
+
+    <label for="clave">Clave de administrador</label>
+    <input id="clave" name="clave" type="password" required>
+
+    <button type="submit" id="btn">Restaurar acceso</button>
+  </form>
+
+  <div id="msg"></div>
+  <p style="margin-top:20px"><a href="/">Volver al inicio</a></p>
+</div>
+
+<script>
+document.getElementById('f').addEventListener('submit', async function (ev) {
+  ev.preventDefault();
+  const btn = document.getElementById('btn');
+  const msg = document.getElementById('msg');
+  btn.disabled = true; msg.className = ''; msg.textContent = 'Comprobando...';
+  try {
+    const res = await fetch('/api/admin/promover', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        usuario: document.getElementById('usuario').value.trim(),
+        clave:   document.getElementById('clave').value
+      })
+    });
+    const d = await res.json();
+    msg.className  = d.ok ? 'ok' : 'err';
+    msg.textContent = d.ok ? d.mensaje
+                    : (res.status === 429
+                        ? 'Demasiados intentos. Espera una hora.'
+                        : (d.error || 'No se pudo'));
+  } catch (e) {
+    msg.className = 'err'; msg.textContent = 'Error de red';
+  }
+  // La clave nunca se queda en pantalla.
+  document.getElementById('clave').value = '';
+  btn.disabled = false;
+});
+</script>

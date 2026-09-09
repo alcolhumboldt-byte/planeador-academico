@@ -745,6 +745,31 @@ def olvidar_sesion(session_id):
     _dueño_sesion.pop(session_id, None)
 
 
+# Minutos que dura el desbloqueo de diagnostico tras escribir la ADMIN_KEY.
+MINUTOS_DIAGNOSTICO = 15
+
+
+def diagnostico_desbloqueado():
+    """La ADMIN_KEY ya no viaja en la URL.
+
+    Antes iba como ?clave=..., asi que quedaba en los logs de acceso de Traefik,
+    en el historial del navegador y en la cabecera Referer — y sobre HTTP plano,
+    ademas, en claro por la red del colegio. Ahora se escribe una vez en un
+    formulario y la sesion queda desbloqueada un rato; para llamadas desde
+    fuera del navegador vale la cabecera X-Admin-Key.
+    """
+    if clave_admin_valida(request.headers.get("X-Admin-Key", "")):
+        return True
+    hasta = session.get("diag_hasta", 0)
+    return bool(hasta and time.time() < hasta)
+
+
+def exigir_admin_diagnostico():
+    """Nombre del admin si ademas tiene el diagnostico desbloqueado, o None."""
+    nombre = exigir_admin()
+    return nombre if nombre and diagnostico_desbloqueado() else None
+
+
 def exigir_admin():
     """Devuelve el nombre si es admin, o None. Para usar en las rutas."""
     nombre = usuario_actual()
@@ -842,10 +867,10 @@ def registro():
 @limiter.limit("10 per hour")
 def debug_api_key():
     """Diagnostico temporal: muestra de donde sale la key y su longitud/prefijo,
-    sin exponerla completa. Requiere sesion de admin Y ?clave=ADMIN_KEY."""
-    nombre = exigir_admin()
-    if not nombre or not clave_admin_valida(request.args.get("clave", "")):
-        log_auditoria("DEBUG_API_KEY_DENEGADO", nombre or "anonimo")
+    sin exponerla completa. Requiere sesion de admin Y diagnostico desbloqueado."""
+    nombre = exigir_admin_diagnostico()
+    if not nombre:
+        log_auditoria("DEBUG_API_KEY_DENEGADO", usuario_actual() or "anonimo")
         return jsonify({"ok": False, "error": "No autorizado"}), 403
     config = cargar_config()
     key_config = config.get("api_key", "")
@@ -868,10 +893,10 @@ def debug_api_key():
 @limiter.limit("30 per hour")
 def admin_listar_capturas():
     """Lista las capturas de diagnostico de Selenium.
-    Requiere sesion de admin Y ?clave=ADMIN_KEY."""
-    nombre = exigir_admin()
-    if not nombre or not clave_admin_valida(request.args.get("clave", "")):
-        log_auditoria("CAPTURAS_DENEGADO", nombre or "anonimo")
+    Requiere sesion de admin Y diagnostico desbloqueado."""
+    nombre = exigir_admin_diagnostico()
+    if not nombre:
+        log_auditoria("CAPTURAS_DENEGADO", usuario_actual() or "anonimo")
         return jsonify({"ok": False, "error": "No autorizado"}), 403
     try:
         archivos = sorted(os.listdir(CARPETA_DEBUG), reverse=True)
@@ -884,9 +909,9 @@ def admin_listar_capturas():
 @limiter.limit("60 per hour")
 def admin_ver_captura(nombre):
     """Descarga una captura puntual.
-    Requiere sesion de admin Y ?clave=ADMIN_KEY. Las capturas pueden contener
-    la pantalla de la plataforma con datos del colegio, asi que no basta la clave."""
-    if not exigir_admin() or not clave_admin_valida(request.args.get("clave", "")):
+    Requiere sesion de admin Y diagnostico desbloqueado. Las capturas pueden
+    llevar la pantalla de la plataforma con datos del colegio."""
+    if not exigir_admin_diagnostico():
         return jsonify({"ok": False, "error": "No autorizado"}), 403
     seguro = os.path.basename(nombre)
     ruta = os.path.join(CARPETA_DEBUG, seguro)
@@ -988,6 +1013,24 @@ def admin_credenciales_coordinacion():
     })
     log_auditoria("COORD_CREDENCIALES", nombre, f"cuenta plataforma={usuario}")
     return jsonify({"ok": True, "configurada": True, "usuario": usuario})
+
+
+@app.route("/api/admin/desbloquear_diagnostico", methods=["POST"])
+@limiter.limit("10 per hour")
+def admin_desbloquear_diagnostico():
+    """Abre el diagnostico por unos minutos tras escribir la ADMIN_KEY.
+
+    Evita tener que ponerla en la URL cada vez. La clave llega en el cuerpo.
+    """
+    nombre = exigir_admin()
+    if not nombre:
+        return jsonify({"ok": False, "error": "No autorizado"}), 403
+    if not clave_admin_valida(_campo_rescate("clave")):
+        log_auditoria("DIAGNOSTICO_CLAVE_INCORRECTA", nombre)
+        return jsonify({"ok": False, "error": "Clave incorrecta"}), 403
+    session["diag_hasta"] = time.time() + MINUTOS_DIAGNOSTICO * 60
+    log_auditoria("DIAGNOSTICO_DESBLOQUEADO", nombre, f"{MINUTOS_DIAGNOSTICO} min")
+    return jsonify({"ok": True, "minutos": MINUTOS_DIAGNOSTICO})
 
 
 @app.route("/api/admin/cola")
@@ -3636,7 +3679,23 @@ def admin_eliminar_perfil(usuario):
     return jsonify({"ok": True, "memorias": borrados})
 
 
-@app.route("/api/admin/promover")
+def _campo_rescate(nombre_campo):
+    """Lee un campo del cuerpo, venga como JSON o como formulario."""
+    if request.is_json:
+        return str((request.get_json(silent=True) or {}).get(nombre_campo, ""))
+    return str(request.form.get(nombre_campo, ""))
+
+
+@app.route("/admin/rescate")
+@limiter.limit("30 per hour")
+def admin_rescate_vista():
+    """Formulario de rescate. No pide sesion: se usa justo cuando nadie puede
+    entrar. No expone ningun secreto, solo recoge la ADMIN_KEY por POST para
+    que no acabe en la URL."""
+    return render_template("rescate.html")
+
+
+@app.route("/api/admin/promover", methods=["POST"])
 @limiter.limit("5 per hour")
 def admin_promover():
     """Crea el primer administrador usando la ADMIN_KEY del servidor.
@@ -3644,13 +3703,16 @@ def admin_promover():
     Es el unico camino de rescate cuando nadie puede entrar como admin, asi que
     concede el rol mas alto de la app: va con limite de intentos y comparacion
     en tiempo constante para que la clave no se pueda adivinar por fuerza bruta.
+
+    Es POST y la clave va en el cuerpo, no en la URL: como GET quedaba escrita
+    en los logs de acceso del proxy y en el historial del navegador.
     """
-    if not clave_admin_valida(request.args.get("clave", "")):
+    if not clave_admin_valida(_campo_rescate("clave")):
         log_auditoria("ADMIN_PROMOVER_DENEGADO",
-                      sanitize(request.args.get("usuario", ""), "nombre") or "?",
+                      sanitize(_campo_rescate("usuario"), "nombre") or "?",
                       "clave incorrecta")
-        return jsonify({"ok": False, "error": "Clave inválida"})
-    usuario = sanitize(request.args.get("usuario", ""), "nombre")
+        return jsonify({"ok": False, "error": "Clave inválida"}), 403
+    usuario = sanitize(_campo_rescate("usuario"), "nombre")
     perfiles = cargar_perfiles()
     if usuario not in perfiles:
         return jsonify({"ok": False, "error": "Perfil no encontrado"})
@@ -4062,10 +4124,9 @@ def apagar_emergencia():
 @limiter.limit("10 per hour")
 def ver_audit_log():
     """Muestra los últimos 100 eventos de auditoría — solo admin."""
-    nombre = usuario_actual()
-    if not nombre: return jsonify({"ok": False})
-    if not clave_admin_valida(request.args.get("clave", "")):
-        log_auditoria("AUDIT_LOG_ACCESO_DENEGADO", nombre)
+    nombre = exigir_admin_diagnostico()
+    if not nombre:
+        log_auditoria("AUDIT_LOG_ACCESO_DENEGADO", usuario_actual() or "anonimo")
         return jsonify({"ok": False, "error": "No autorizado"}), 403
     ruta_log = os.path.join(CARPETA_DATOS, "audit.log")
     if not os.path.exists(ruta_log):
