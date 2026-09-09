@@ -202,14 +202,23 @@ def _crear_driver_chrome():
 # unos pocos a la vez; pasado ese punto el kernel mata un proceso a medias y el
 # profesor ve un error raro despues de haber esperado varios minutos. Mejor
 # hacer la fila explicita: uno entra, los demas esperan y ven su turno.
-MAX_CHROMES = max(1, int(os.environ.get("MAX_CHROMES", "1") or 1))
+def _entero_env(nombre, por_defecto, minimo):
+    """Lee un entero del entorno sin tumbar la app si viene mal escrito."""
+    try:
+        return max(minimo, int(os.environ.get(nombre, "") or por_defecto))
+    except (TypeError, ValueError):
+        print(f"[!] {nombre} no es un numero — usando {por_defecto}", flush=True)
+        return por_defecto
+
+
+MAX_CHROMES = _entero_env("MAX_CHROMES", 1, 1)
 
 # Un turno abandonado no puede bloquear la fila para siempre. El TTL cuenta
 # SILENCIO, no duracion: renovar_turno() lo reinicia cada vez que la tanda
 # escribe en el log de progreso. Asi una verificacion de 34 docentes que tarda
 # media hora nunca se da por muerta, pero un Chrome que quedo abierto porque el
 # profesor cerro la pestana se recupera en 15 minutos.
-TTL_TURNO = max(300, int(os.environ.get("TTL_TURNO", "900") or 900))
+TTL_TURNO = _entero_env("TTL_TURNO", 900, 300)
 
 _cola_cv     = threading.Condition()
 _turnos      = {}    # session_id -> momento en que tomo el turno
@@ -327,6 +336,16 @@ SECRET_KEY_INSEGURA    = (SECRET_KEY_ACTUAL == SECRET_KEY_POR_DEFECTO)
 
 app.secret_key = SECRET_KEY_ACTUAL
 
+# Detras de Coolify la app no ve al cliente: ve a Traefik. Sin esto
+# request.remote_addr es siempre la IP del proxy, con dos efectos que anulan
+# medio trabajo de seguridad — todos los rate limits pasan a ser un balde
+# compartido (10 peticiones a /login dejan sin login a todo el colegio) y el
+# log de auditoria registra siempre la misma IP, asi que no atribuye nada.
+# x_for=1 exacto: Traefik es el UNICO salto. Un numero mayor haria confiar en
+# cabeceras que el cliente puede falsificar.
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
 if SECRET_KEY_INSEGURA:
     print("=" * 70, flush=True)
     print("[!!] SECRET_KEY NO CONFIGURADA — usando el valor por defecto del repo.", flush=True)
@@ -427,12 +446,36 @@ RUTA_CONFIG  = os.path.join(CARPETA_DATOS, "config.json")
 CARPETA_DEBUG = os.path.join(CARPETA_DATOS, "debug")
 
 
+DIAS_CAPTURAS = 7
+
+
+def _purgar_capturas_viejas():
+    """Borra capturas de mas de DIAS_CAPTURAS dias.
+
+    Guardan el HTML completo de la plataforma, que con la cuenta de
+    coordinacion incluye la lista de los 34 docentes y su planeacion. Sin
+    caducidad eso se acumula en claro en el volumen para siempre.
+    """
+    try:
+        limite = time.time() - DIAS_CAPTURAS * 86400
+        for archivo in os.listdir(CARPETA_DEBUG):
+            ruta = os.path.join(CARPETA_DEBUG, archivo)
+            try:
+                if os.path.isfile(ruta) and os.path.getmtime(ruta) < limite:
+                    os.remove(ruta)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
 def _capturar_debug(driver, etiqueta):
     """Guarda pantallazo + HTML de lo que el navegador esta viendo.
     Sirve para diagnosticar fallos de Selenium en el servidor headless,
     donde no hay forma de mirar la pantalla. Nunca lanza excepcion."""
     try:
         os.makedirs(CARPETA_DEBUG, exist_ok=True)
+        _purgar_capturas_viejas()
         sello = datetime.now().strftime("%Y%m%d_%H%M%S")
         limpio = "".join(c for c in str(etiqueta) if c.isalnum() or c in "-_")[:40]
         base = os.path.join(CARPETA_DEBUG, f"{sello}_{limpio}")
@@ -668,6 +711,40 @@ def puede_planear(nombre):
     return perfil.get("puede_planear", True)
 
 
+# Quien creo cada session_id de progreso. Los paneles de avance exponen datos
+# sensibles — el reporte de coordinacion trae los 34 docentes con nombre y quien
+# no planeo — asi que el id no puede ser la unica proteccion: es un secreto
+# adivinable, no una credencial.
+_dueño_sesion = {}   # session_id -> nombre de usuario
+
+
+def registrar_sesion(session_id, nombre):
+    _dueño_sesion[session_id] = nombre
+
+
+def dueño_de_sesion(session_id):
+    return _dueño_sesion.get(session_id)
+
+
+def puede_ver_sesion(session_id):
+    """Nombre del usuario si puede ver ese progreso, o None.
+
+    Ve su propia sesion; el admin ve cualquiera. Una sesion desconocida (ya
+    caducada o inventada) no se distingue de una ajena a proposito: responder
+    distinto permitiria averiguar que ids existen.
+    """
+    nombre = usuario_actual()
+    if not nombre:
+        return None
+    if es_admin(nombre):
+        return nombre
+    return nombre if _dueño_sesion.get(session_id) == nombre else None
+
+
+def olvidar_sesion(session_id):
+    _dueño_sesion.pop(session_id, None)
+
+
 def exigir_admin():
     """Devuelve el nombre si es admin, o None. Para usar en las rutas."""
     nombre = usuario_actual()
@@ -855,7 +932,8 @@ def admin_salud_seguridad():
     """
     if not exigir_admin():
         return jsonify({"ok": False, "error": "No autorizado"}), 403
-    https = request.is_secure or request.headers.get("X-Forwarded-Proto", "") == "https"
+    # ProxyFix ya traduce X-Forwarded-Proto, asi que is_secure dice la verdad.
+    https = request.is_secure
     checks = {
         "secret_key_configurada":  not SECRET_KEY_INSEGURA,
         "admin_key_configurada":   bool(os.environ.get("ADMIN_KEY", "")),
@@ -889,8 +967,11 @@ def admin_credenciales_coordinacion():
         usuario, password = _credenciales_coordinacion()
         return jsonify({"ok": True, "configurada": bool(usuario), "usuario": usuario or ""})
 
-    data     = get_json_safe()
-    usuario  = sanitize(data.get("usuario", ""), "text")
+    data = get_json_safe()
+    # Sin sanitize("text"): eso escapa HTML, y un usuario con & < > " \' se
+    # guardaria corrupto para fallar despues en Selenium como "clave incorrecta".
+    # Es una credencial, no contenido que se vaya a renderizar.
+    usuario  = str(data.get("usuario", "")).strip()[:100]
     password = str(data.get("password", "")).strip()[:100]
 
     if data.get("borrar"):
@@ -1650,8 +1731,9 @@ def guardar_credenciales_colegio():
     """Guarda usuario y contraseña del colegio encriptados."""
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
-    data     = get_json_safe()
-    usuario  = sanitize(data.get("usuario_colegio", ""), "text")
+    data = get_json_safe()
+    # Ver nota en admin_credenciales_coordinacion: una credencial no se escapa.
+    usuario  = str(data.get("usuario_colegio", "")).strip()[:100]
     password = str(data.get("password_colegio", "")).strip()[:100]
     if not usuario or not password:
         return jsonify({"ok": False, "error": "Usuario y contraseña requeridos"})
@@ -1699,14 +1781,16 @@ def detectar_materias():
     luego barre todos los cursos y devuelve
     las asignaturas encontradas.
     """
-    if not SELENIUM_OK:
-        return jsonify({"ok": False, "error": "Selenium no instalado. Corre: pip3 install selenium webdriver-manager"})
-
+    # Autorizar ANTES de cualquier comprobacion de capacidad: si no, un
+    # desconocido averigua el estado interno del servidor con una peticion.
     nombre = usuario_actual()
     if not nombre:
-        return jsonify({"ok": False, "error": "No hay sesion activa"})
+        return jsonify({"ok": False, "error": "No hay sesion activa"}), 403
     if not puede_planear(nombre):
         return jsonify({"ok": False, "error": "Sin permiso"}), 403
+
+    if not SELENIUM_OK:
+        return jsonify({"ok": False, "error": "Selenium no instalado. Corre: pip3 install selenium webdriver-manager"})
 
     # Usando constantes globales
 
@@ -1938,15 +2022,16 @@ def enviar_plataforma():
     del colegio usando Selenium. Devuelve un session_id para
     consultar el progreso.
     """
-    if not SELENIUM_OK:
-        return jsonify({"ok": False,
-            "error": "Selenium no instalado. Corre: pip3 install selenium webdriver-manager"})
 
     nombre = usuario_actual()
     if not nombre:
         return jsonify({"ok": False, "error": "No hay sesión activa"})
     if not puede_planear(nombre):
         return jsonify({"ok": False, "error": "Sin permiso"}), 403
+
+    if not SELENIUM_OK:
+        return jsonify({"ok": False,
+            "error": "Selenium no instalado. Corre: pip3 install selenium webdriver-manager"})
 
     data      = get_json_safe()
     grupos    = data.get("grupos", [])      # [{cursos:[...], titulo:"", actividades:"", recursos:""}]
@@ -1959,14 +2044,15 @@ def enviar_plataforma():
 
     # Crear ID de sesión único para esta tarea
     import uuid
-    session_id = str(uuid.uuid4())[:8]
+    session_id = uuid.uuid4().hex
+    registrar_sesion(session_id, nombre)
     _progreso_sesiones[session_id] = []
 
     # Usando constantes globales
 
     # Reutilizar driver existente si hay una sesión activa
     driver_existente = data.get("session_id_anterior", "")
-    driver_existente = re.sub(r'[^a-f0-9]', '', driver_existente)[:8]
+    driver_existente = re.sub(r'[^a-f0-9]', '', driver_existente)[:32]
 
     def correr_selenium():
         log = lambda t, m: _log_progreso(session_id, t, m)
@@ -2446,20 +2532,25 @@ def enviar_plataforma():
 @app.route("/api/cerrar_chrome/<session_id>", methods=["POST"])
 def cerrar_chrome(session_id):
     """Cierra Chrome cuando el profesor termina todas las materias."""
-    session_id = re.sub(r'[^a-f0-9]', '', session_id)[:8]
+    session_id = re.sub(r'[^a-f0-9]', '', session_id)[:32]
+    if not puede_ver_sesion(session_id):
+        return jsonify({"ok": False, "error": "No autorizado"}), 403
     driver = _drivers_activos.pop(session_id, None)
     if driver:
         try: driver.quit()
         except: pass
     soltar_turno(session_id)
     _progreso_sesiones.pop(session_id, None)
+    olvidar_sesion(session_id)
     return jsonify({"ok": True})
 
 
 @app.route("/api/progreso/<session_id>")
 def obtener_progreso(session_id):
-    """Devuelve el log de progreso de una sesión de envío."""
-    session_id = re.sub(r'[^a-f0-9]', '', session_id)[:8]  # sanitizar
+    """Devuelve el log de progreso de una sesión de envío — solo a su dueño."""
+    session_id = re.sub(r'[^a-f0-9]', '', session_id)[:32]  # sanitizar
+    if not puede_ver_sesion(session_id):
+        return jsonify({"ok": False, "error": "No autorizado"}), 403
     logs = _progreso_sesiones.get(session_id, [])
     # Limpiar sesiones muy viejas (más de 50 entradas)
     if len(logs) > 100:
@@ -2616,22 +2707,25 @@ IMPORTANTE:
 @limiter.limit("10 per hour")
 def agente_ejecutar():
     """Ejecuta el plan de tareas con Selenium."""
+    # Autorizar ANTES de cualquier comprobacion de capacidad: si no, un
+    # desconocido averigua el estado interno del servidor con una peticion.
+    nombre = usuario_actual()
+    if not nombre: return jsonify({"ok": False}), 403
+    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
+
     if not SELENIUM_OK:
         return jsonify({"ok": False, "error": "Selenium no instalado"})
 
-    nombre = usuario_actual()
-    if not nombre: return jsonify({"ok": False})
-    if not puede_planear(nombre): return jsonify({"ok": False, "error": "Sin permiso"}), 403
-
     data   = get_json_safe()
     tareas = data.get("tareas", [])
-    sid_anterior = re.sub(r'[^a-f0-9]', '', data.get("session_id_anterior", ""))[:8]
+    sid_anterior = re.sub(r'[^a-f0-9]', '', data.get("session_id_anterior", ""))[:32]
 
     if not tareas:
         return jsonify({"ok": False, "error": "Sin tareas"})
 
     import uuid
-    session_id = str(uuid.uuid4())[:8]
+    session_id = uuid.uuid4().hex
+    registrar_sesion(session_id, nombre)
     _agente_sesiones[session_id] = []
 
     def log(tipo, msg):
@@ -3266,7 +3360,9 @@ def _login_coordinacion(driver, nombre, log):
         log("info", "No hay cuenta de coordinación configurada — se intentará "
                     "con tus credenciales del colegio")
         return _login_automatico(driver, nombre, log)
-    log("info", f"Entrando como {usuario} (cuenta de coordinación del servidor)")
+    # El identificador de esa cuenta suele ser la cedula de una persona y el
+    # panel de progreso lo ve cualquier coordinador: queda solo en auditoria.
+    log("info", "Entrando con la cuenta de coordinación del servidor")
     log_auditoria("COORD_LOGIN", nombre, f"cuenta plataforma={usuario}")
     return _login_con(driver, usuario, password, log)
 
@@ -3439,7 +3535,10 @@ def _ejecutar_comunicado(driver, tarea, log):
 
 @app.route("/api/agente/progreso/<session_id>")
 def agente_progreso(session_id):
-    session_id = re.sub(r'[^a-f0-9]', '', session_id)[:8]
+    """Avance del agente — solo a su dueño."""
+    session_id = re.sub(r'[^a-f0-9]', '', session_id)[:32]
+    if not puede_ver_sesion(session_id):
+        return jsonify({"ok": False, "error": "No autorizado"}), 403
     logs = _agente_sesiones.get(session_id, [])
     return jsonify({"ok": True, "logs": logs})
 
@@ -3596,22 +3695,23 @@ def verificar_planeaciones():
     del coordinador, navega por todos los cursos y materias,
     y verifica si tienen planeación para el periodo/bloque indicado.
     """
+    # Autorizar ANTES de cualquier comprobacion de capacidad: si no, un
+    # desconocido averigua el estado interno del servidor con una peticion.
+    nombre = usuario_actual()
+    if not nombre: return jsonify({"ok": False}), 403
+    if not puede_coordinar(nombre):
+        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"}), 403
+
     if not SELENIUM_OK:
         return jsonify({"ok": False, "error": "Selenium no instalado"})
-
-    nombre = usuario_actual()
-    if not nombre: return jsonify({"ok": False})
-    # Solo coordinadores
-    perfiles_check = cargar_perfiles()
-    if not puede_coordinar(nombre):
-        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
 
     data     = get_json_safe()
     periodo  = sanitize(str(data.get("periodo", "1")), "año")[:1]
     bloque   = sanitize(str(data.get("bloque", "0")), "año")[:1]
 
     import uuid
-    session_id = str(uuid.uuid4())[:8]
+    session_id = uuid.uuid4().hex
+    registrar_sesion(session_id, nombre)
     _reporte_sesiones[session_id] = {"logs": [], "reporte": None}
 
     def log(tipo, msg):
@@ -3774,7 +3874,10 @@ def verificar_planeaciones():
             log("done", "Reporte listo — revisa los resultados")
 
         except Exception as e:
-            log("error", f"Error general: {str(e)}")
+            # Recortado: los stacktraces de Selenium traen rutas del contenedor
+            # y a veces URLs con parametros. El detalle va al log de auditoria.
+            log("error", f"Error general: {str(e)[:120]}")
+            log_auditoria("COORD_ERROR", nombre, f"{type(e).__name__}: {str(e)[:300]}")
             try: driver.quit()
             except Exception: pass
 
@@ -3785,8 +3888,16 @@ def verificar_planeaciones():
 
 @app.route("/api/coordinador/progreso/<session_id>")
 def coordinador_progreso(session_id):
-    session_id = re.sub(r'[^a-f0-9]', '', session_id)[:8]
-    datos      = _reporte_sesiones.get(session_id, {})
+    """Avance del reporte de coordinacion.
+
+    Lleva autorizacion porque la respuesta trae el reporte entero: los 34
+    docentes con nombre y cuales no planearon. El session_id es un secreto
+    adivinable, no una credencial.
+    """
+    session_id = re.sub(r'[^a-f0-9]', '', session_id)[:32]
+    if not puede_ver_sesion(session_id):
+        return jsonify({"ok": False, "error": "No autorizado"}), 403
+    datos = _reporte_sesiones.get(session_id, {})
     return jsonify({
         "ok":      True,
         "logs":    datos.get("logs", []),
@@ -3798,7 +3909,7 @@ def coordinador_reportes():
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
     if not puede_coordinar(nombre):
-        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
+        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"}), 403
     return jsonify({"ok": True, "reportes": _listar_reportes()})
 
 
@@ -3807,7 +3918,7 @@ def coordinador_reporte(archivo):
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
     if not puede_coordinar(nombre):
-        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
+        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"}), 403
     # Solo el nombre de archivo, nunca rutas
     archivo = os.path.basename(re.sub(r"[^0-9A-Za-z_\-\.]", "", archivo))
     ruta = os.path.join(CARPETA_REPORTES, archivo)
@@ -3825,7 +3936,7 @@ def coordinador_informe():
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
     if not puede_coordinar(nombre):
-        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
+        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"}), 403
 
     api_key = get_api_key()
     if not api_key:
@@ -3886,7 +3997,7 @@ def coordinador_eliminar_reporte(archivo):
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
     if not puede_coordinar(nombre):
-        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
+        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"}), 403
     archivo = os.path.basename(re.sub(r"[^0-9A-Za-z_\-\.]", "", archivo))
     ruta = os.path.join(CARPETA_REPORTES, archivo)
     if not archivo.endswith(".json") or not os.path.isfile(ruta):
@@ -3904,7 +4015,7 @@ def coordinador_historial():
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
     if not puede_coordinar(nombre):
-        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
+        return jsonify({"ok": False, "error": "Acceso solo para coordinadores"}), 403
     periodo = request.args.get("periodo") or None
     return jsonify({"ok": True, **_historial(periodo)})
 
