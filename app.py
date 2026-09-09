@@ -373,6 +373,25 @@ def agregar_headers_seguridad(response):
     response.headers['Permissions-Policy'] = 'geolocation=(), camera=(), microphone=(self)'
     return response
 
+@app.context_processor
+def _permisos_menu():
+    """Permisos frescos para el menu lateral, recalculados en cada render.
+
+    El menu leia session['es_coordinador'], que solo se escribe al iniciar
+    sesion: cambiar un interruptor en /admin/perfiles no se notaba hasta volver
+    a entrar, y el menu aparecia distinto segun la pantalla. Calcularlo aqui lo
+    deja igual en toda la app y siempre al dia.
+    """
+    nombre = session.get("usuario")
+    if not nombre:
+        return {"nav_planear": False, "nav_coordinar": False, "nav_admin": False}
+    return {
+        "nav_planear":   puede_planear(nombre),
+        "nav_coordinar": puede_coordinar(nombre),
+        "nav_admin":     es_admin(nombre),
+    }
+
+
 # ── Rate Limiter ──────────────────────────────
 # Límites por defecto (se sobreescriben por ruta)
 # Formato: "cantidad por periodo" — ej: "10 per minute"
@@ -606,6 +625,17 @@ def es_admin(nombre):
     return bool(cargar_perfiles().get(nombre, {}).get("es_admin", False))
 
 
+def puede_coordinar(nombre):
+    """Quien puede entrar al modulo de coordinacion.
+
+    El administrador entra siempre, sin tener que activarse el interruptor de
+    coordinacion: si se lo activara perderia el modulo de profesor, y quien
+    administra la app suele dictar clase tambien.
+    """
+    perfil = cargar_perfiles().get(nombre, {})
+    return bool(perfil.get("es_coordinador", False) or perfil.get("es_admin", False))
+
+
 def puede_planear(nombre):
     """Quien puede entrar al modulo de profesor.
 
@@ -613,8 +643,13 @@ def puede_planear(nombre):
     (layout.html), y aqui se bloquea tambien por servidor para que escribir
     /planear en la barra no sirva de nada. El admin puede ademas revocar el
     permiso a cualquier profesor con el interruptor de /admin/perfiles.
+
+    El administrador queda exento de esa exclusion: necesita las dos caras de
+    la app — probar coordinacion sin dejar de planear sus propias materias.
     """
     perfil = cargar_perfiles().get(nombre, {})
+    if perfil.get("es_admin", False):
+        return perfil.get("puede_planear", True)
     if perfil.get("es_coordinador", False):
         return False
     return perfil.get("puede_planear", True)
@@ -850,7 +885,7 @@ def dashboard():
     perfiles = cargar_perfiles()
     mats     = get_materias(perfiles, nombre)
     año      = get_año(perfiles, nombre)
-    es_coord = cargar_perfiles().get(nombre, {}).get("es_coordinador", False)
+    es_coord = puede_coordinar(nombre)
     # El dashboard muestra materias y planeaciones propias: no aplica a
     # coordinacion, que solo usa el reporte de verificacion.
     if es_coord:
@@ -3405,7 +3440,7 @@ def coordinador_historial_vista():
     nombre = usuario_actual()
     if not nombre: return redirect(url_for("index"))
     perfiles = cargar_perfiles()
-    if not perfiles[nombre].get("es_coordinador", False):
+    if not puede_coordinar(nombre):
         return redirect(url_for("dashboard"))
     return render_template("historial.html",
         nombre=nombre, año=get_año(perfiles, nombre), es_coordinador=True)
@@ -3417,7 +3452,7 @@ def coordinador():
     if not nombre: return redirect(url_for("index"))
     perfiles = cargar_perfiles()
     # Solo coordinadores pueden acceder
-    if not perfiles[nombre].get("es_coordinador", False):
+    if not puede_coordinar(nombre):
         return redirect(url_for("dashboard"))
     año = get_año(perfiles, nombre)
     return render_template("coordinador.html",
@@ -3439,7 +3474,7 @@ def verificar_planeaciones():
     if not nombre: return jsonify({"ok": False})
     # Solo coordinadores
     perfiles_check = cargar_perfiles()
-    if not perfiles_check.get(nombre, {}).get("es_coordinador", False):
+    if not puede_coordinar(nombre):
         return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
 
     data     = get_json_safe()
@@ -3627,7 +3662,7 @@ def coordinador_progreso(session_id):
 def coordinador_reportes():
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
-    if not cargar_perfiles().get(nombre, {}).get("es_coordinador", False):
+    if not puede_coordinar(nombre):
         return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
     return jsonify({"ok": True, "reportes": _listar_reportes()})
 
@@ -3636,7 +3671,7 @@ def coordinador_reportes():
 def coordinador_reporte(archivo):
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
-    if not cargar_perfiles().get(nombre, {}).get("es_coordinador", False):
+    if not puede_coordinar(nombre):
         return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
     # Solo el nombre de archivo, nunca rutas
     archivo = os.path.basename(re.sub(r"[^0-9A-Za-z_\-\.]", "", archivo))
@@ -3654,7 +3689,7 @@ def coordinador_informe():
     llamaba directo a la API sin key (y sin poder tenerla): no funcionaba."""
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
-    if not cargar_perfiles().get(nombre, {}).get("es_coordinador", False):
+    if not puede_coordinar(nombre):
         return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
 
     api_key = get_api_key()
@@ -3715,7 +3750,7 @@ def coordinador_informe():
 def coordinador_eliminar_reporte(archivo):
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
-    if not cargar_perfiles().get(nombre, {}).get("es_coordinador", False):
+    if not puede_coordinar(nombre):
         return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
     archivo = os.path.basename(re.sub(r"[^0-9A-Za-z_\-\.]", "", archivo))
     ruta = os.path.join(CARPETA_REPORTES, archivo)
@@ -3733,7 +3768,7 @@ def coordinador_eliminar_reporte(archivo):
 def coordinador_historial():
     nombre = usuario_actual()
     if not nombre: return jsonify({"ok": False})
-    if not cargar_perfiles().get(nombre, {}).get("es_coordinador", False):
+    if not puede_coordinar(nombre):
         return jsonify({"ok": False, "error": "Acceso solo para coordinadores"})
     periodo = request.args.get("periodo") or None
     return jsonify({"ok": True, **_historial(periodo)})
