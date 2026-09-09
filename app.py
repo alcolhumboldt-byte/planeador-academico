@@ -2792,6 +2792,34 @@ def _obs_esperar_select(driver, id_select, timeout=TIMEOUT):
     """, id_select))
 
 
+def _obs_firma_select(driver, id_select):
+    """Huella del contenido de un select, para saber cuando cambia DE VERDAD."""
+    return driver.execute_script("""
+        var s = document.getElementById(arguments[0]);
+        if (!s) return null;
+        var v = [];
+        for (var i = 0; i < s.options.length; i++) v.push(s.options[i].value);
+        return v.join(',');
+    """, id_select)
+
+
+def _obs_esperar_cambio(driver, id_select, firma_previa, timeout=TIMEOUT):
+    """Espera a que un select se repueble con contenido DISTINTO al anterior.
+
+    Esperar solo a que "tenga opciones" no basta: al pasar al siguiente docente
+    el select CURSO todavia trae los cursos del anterior, la espera se cumple al
+    instante y se lee la carga de otra persona. Igual con ASIGNATURA al cambiar
+    de curso. Esa es la diferencia entre un reporte correcto y uno que le
+    atribuye a un profesor cursos que no dicta.
+    """
+    def cambio(d):
+        actual = _obs_firma_select(d, id_select)
+        if actual is None or not actual.strip(","):
+            return False
+        return actual != firma_previa
+    WebDriverWait(driver, timeout).until(cambio)
+
+
 def _obs_opciones(driver, id_select, recargar=False):
     """Opciones de un select del modulo. Con recargar=True abre la pagina primero."""
     if recargar:
@@ -2807,13 +2835,26 @@ def _obs_cursos(driver, cod_docente):
     actual = driver.execute_script(
         "var d = document.getElementById('DOCENTE'); return d ? d.value : null;")
     if actual != cod_docente:
+        firma = _obs_firma_select(driver, "CURSO")
         driver.execute_script("""
             var d = document.getElementById('DOCENTE');
             d.value = arguments[0];
             if (typeof t_cur === 'function') t_cur(d.value);
             else d.dispatchEvent(new Event('change', {bubbles: true}));
         """, cod_docente)
-        _obs_esperar_select(driver, "CURSO")
+        try:
+            _obs_esperar_cambio(driver, "CURSO", firma)
+        except TimeoutException:
+            # Dos docentes pueden dictar exactamente los mismos cursos: la lista
+            # no cambia y no hay nada que esperar. Se sigue solo si ya hay algo.
+            _obs_esperar_select(driver, "CURSO")
+
+    # La plataforma tiene que confirmar el docente antes de creerle a la lista.
+    puesto = driver.execute_script(
+        "var d = document.getElementById('DOCENTE'); return d ? d.value : null;")
+    if puesto != cod_docente:
+        raise RuntimeError(
+            "la plataforma no fijo el docente %s (quedo en %r)" % (cod_docente, puesto))
     return _obs_leer_select(driver, "CURSO")
 
 
@@ -2823,13 +2864,23 @@ def _obs_asignaturas(driver, cod_docente, cod_curso):
     actual = driver.execute_script(
         "var c = document.getElementById('CURSO'); return c ? c.value : null;")
     if actual != cod_curso:
+        firma = _obs_firma_select(driver, "ASIGNATURA")
         driver.execute_script("""
             var c = document.getElementById('CURSO');
             c.value = arguments[0];
             if (typeof colocarsemper === 'function') colocarsemper();
             else c.dispatchEvent(new Event('change', {bubbles: true}));
         """, cod_curso)
-        _obs_esperar_select(driver, "ASIGNATURA")
+        try:
+            _obs_esperar_cambio(driver, "ASIGNATURA", firma)
+        except TimeoutException:
+            _obs_esperar_select(driver, "ASIGNATURA")
+
+    puesto = driver.execute_script(
+        "var c = document.getElementById('CURSO'); return c ? c.value : null;")
+    if puesto != cod_curso:
+        raise RuntimeError(
+            "la plataforma no fijo el curso %s (quedo en %r)" % (cod_curso, puesto))
     return _obs_leer_select(driver, "ASIGNATURA")
 
 
@@ -3583,6 +3634,12 @@ def verificar_planeaciones():
                     log("info", f"  {doc['nombre']}: sin cursos asignados")
                     continue
 
+                # Deja rastro de la carga leida: si a alguien le salen cursos que
+                # no dicta, se ve aqui en vez de acabar como un dato falso en el
+                # reporte.
+                log("info", "  %d cursos: %s" % (
+                    len(cursos), ", ".join(c["codigo"] for c in cursos[:12])))
+
                 carga[doc["nombre"]] = []
 
                 for curso in cursos:
@@ -3616,12 +3673,12 @@ def verificar_planeaciones():
                             reporte["completos"].append(entrada)
                             d["completos"].append(f"{curso['codigo']} {asig['nombre']}")
                             m["completos"].append(curso["codigo"])
-                            log("ok", f"  ✓ {curso['codigo']} — {asig['nombre']}")
+                            log("ok", f"  {curso['codigo']} — {asig['nombre']}")
                         else:
                             reporte["faltantes"].append(entrada)
                             d["faltantes"].append(f"{curso['codigo']} {asig['nombre']}")
                             m["faltantes"].append(curso["codigo"])
-                            log("warn", f"  ✗ {curso['codigo']} — {asig['nombre']} — SIN PLANEACIÓN")
+                            log("warn", f"  {curso['codigo']} — {asig['nombre']} — SIN PLANEACIÓN")
 
             _reporte_sesiones[session_id]["reporte"] = reporte
             try:
