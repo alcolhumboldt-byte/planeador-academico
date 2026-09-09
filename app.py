@@ -399,6 +399,9 @@ AÑO_ACTUAL   = str(datetime.now().year)
 URL_LOGIN  = "https://www.colhumboldt.controlacademico.com/login.php"
 URL_PLANES = "https://www.colhumboldt.controlacademico.com/modules.php?name=Plan_Aula"
 URL_AULA_V = "https://www.colhumboldt.controlacademico.com/AulaVirtual/preguntaseval/inicio.php"
+# Modulo de observaciones del plan de aula. A diferencia de URL_PLANES, sus
+# selects vienen filtrados por docente: la plataforma ya sabe quien dicta que.
+URL_OBS    = "https://www.colhumboldt.controlacademico.com/modules.php?name=Plan_Aula_Obs"
 PAUSA      = 4
 TIMEOUT    = 45
 RUTA_CONFIG  = os.path.join(CARPETA_DATOS, "config.json")
@@ -2686,6 +2689,271 @@ def agente_ejecutar():
     return jsonify({"ok": True, "session_id": session_id})
 
 
+# ─────────────────────────────────────────────
+# PLATAFORMA — MODULO DE OBSERVACIONES (Plan_Aula_Obs)
+# ─────────────────────────────────────────────
+# Todo lo de aqui esta comprobado contra la plataforma en vivo (8-sep-2026),
+# no deducido del codigo. Como funciona la pantalla:
+#
+#   select#DOCENTE   onchange t_cur(valor)
+#        -> reemplaza el HTML del div C_CURSO por un select#CURSO nuevo
+#   select#CURSO     onchange colocarsemper()
+#        -> llena a la vez C_PERIODO (select#PERIODO) y C_ASIGNATURAS (select#ASIGNATURA)
+#   select#ASIGNATURA onchange dtsasignatura(valor)
+#   select#PERIODO    onchange inicializarcapas(); asignatperiodo(esteSelect)
+#   button#buttonx   "Listar Informacion" -> validarformulario(1)
+#
+# Detalle que importa: antes de elegir docente, los selects de Curso, Periodo y
+# Asignatura NO existen. En su lugar hay placeholders sin id (name select1/2/3).
+# Por eso no sirve esperar por By.ID hasta despues de disparar el cambio.
+#
+# Otro detalle, comprobado a proposito porque en el modulo de envio pasa lo
+# contrario: aqui Listar NO resetea los selects. Las selecciones sobreviven, asi
+# que no hay que rehacerlas en cada materia.
+#
+# Columnas de la tabla de resultados:
+#   0=No  1=Per  2=Fecha Registro  3=Fecha Inicio  4=Fecha Final  5=Informacion  6=Accion
+COL_PERIODO      = 1
+COL_FECHA_INICIO = 3
+COL_INFORMACION  = 5
+
+
+def _obs_leer_select(driver, id_select):
+    """Opciones reales de un select (descarta el ---SELECCIONE---).
+
+    Se lee entero en una sola llamada al navegador. Recorrer las <option> con
+    find_elements cuesta un viaje por opcion, y con 34 docentes x 22 cursos eso
+    es lo que volvia eterna la verificacion.
+    """
+    datos = driver.execute_script("""
+        var s = document.getElementById(arguments[0]);
+        if (!s) return null;
+        var out = [];
+        for (var i = 0; i < s.options.length; i++) {
+            var v = (s.options[i].value || '').trim();
+            var t = (s.options[i].text  || '').trim();
+            if (!v) continue;                                   // el placeholder va sin value
+            if (t.toUpperCase().indexOf('SELECCIONE') >= 0) continue;
+            out.push({"codigo": v, "nombre": t});
+        }
+        return out;
+    """, id_select)
+    return datos or []
+
+
+def _obs_esperar_select(driver, id_select, timeout=TIMEOUT):
+    """Espera a que un select creado por JS exista Y traiga opciones de verdad.
+
+    Esperar solo a que exista no basta: el div se rellena en dos tiempos y
+    leerlo antes devuelve una lista vacia que parece 'docente sin cursos'.
+    """
+    WebDriverWait(driver, timeout).until(lambda d: d.execute_script("""
+        var s = document.getElementById(arguments[0]);
+        if (!s) return false;
+        for (var i = 0; i < s.options.length; i++) {
+            if ((s.options[i].value || '').trim()) return true;
+        }
+        return false;
+    """, id_select))
+
+
+def _obs_opciones(driver, id_select, recargar=False):
+    """Opciones de un select del modulo. Con recargar=True abre la pagina primero."""
+    if recargar:
+        driver.get(URL_OBS)
+        WebDriverWait(driver, TIMEOUT).until(
+            EC.presence_of_element_located((By.ID, id_select)))
+        time.sleep(1)
+    return _obs_leer_select(driver, id_select)
+
+
+def _obs_cursos(driver, cod_docente):
+    """Elige el docente y devuelve los cursos que la plataforma le asigna."""
+    actual = driver.execute_script(
+        "var d = document.getElementById('DOCENTE'); return d ? d.value : null;")
+    if actual != cod_docente:
+        driver.execute_script("""
+            var d = document.getElementById('DOCENTE');
+            d.value = arguments[0];
+            if (typeof t_cur === 'function') t_cur(d.value);
+            else d.dispatchEvent(new Event('change', {bubbles: true}));
+        """, cod_docente)
+        _obs_esperar_select(driver, "CURSO")
+    return _obs_leer_select(driver, "CURSO")
+
+
+def _obs_asignaturas(driver, cod_docente, cod_curso):
+    """Elige el curso y devuelve las asignaturas que ese docente dicta ahi."""
+    _obs_cursos(driver, cod_docente)   # sale gratis si el docente ya esta puesto
+    actual = driver.execute_script(
+        "var c = document.getElementById('CURSO'); return c ? c.value : null;")
+    if actual != cod_curso:
+        driver.execute_script("""
+            var c = document.getElementById('CURSO');
+            c.value = arguments[0];
+            if (typeof colocarsemper === 'function') colocarsemper();
+            else c.dispatchEvent(new Event('change', {bubbles: true}));
+        """, cod_curso)
+        _obs_esperar_select(driver, "ASIGNATURA")
+    return _obs_leer_select(driver, "ASIGNATURA")
+
+
+def _obs_leer_tabla(driver):
+    """Filas de la tabla de resultados, en una sola llamada al navegador.
+
+    La tabla no tiene id ni clase, asi que se la busca por su fila de
+    encabezado. Y se lee con execute_script a proposito: pedir
+    find_element(By.TAG_NAME, 'body').text obliga a Selenium a calcular la
+    visibilidad de la pagina entera y en Chromium headless se queda esperando
+    sin lanzar excepcion, de modo que ningun timeout lo rescata.
+    """
+    return driver.execute_script("""
+        var tablas = document.getElementsByTagName('table');
+        for (var t = 0; t < tablas.length; t++) {
+            var filas = tablas[t].rows;
+            for (var i = 0; i < filas.length; i++) {
+                var c = filas[i].cells;
+                if (c.length < 7) continue;
+                if ((c[0].innerText || '').trim() !== 'No') continue;
+                if ((c[3].innerText || '').indexOf('Inicio') < 0) continue;
+                var out = [];
+                for (var j = i + 1; j < filas.length; j++) {
+                    var d = filas[j].cells;
+                    if (d.length < 6) continue;
+                    out.push({
+                        "periodo":      (d[1].innerText || '').trim(),
+                        "fecha_inicio": (d[3].innerText || '').trim(),
+                        "informacion":  (d[5].innerText || '').trim()
+                    });
+                }
+                return out;
+            }
+        }
+        return [];
+    """) or []
+
+
+def _obs_verificar(driver, cod_docente, cod_curso, cod_asig, periodo, fecha_bloque):
+    """True si ese docente ya planeo ese bloque en ese curso y asignatura.
+
+    Una sola pulsada de Listar devuelve TODAS las planeaciones del periodo, asi
+    que el bloque se decide comparando fechas, sin repetir la consulta.
+
+    Se mira la columna Informacion para saber si hay contenido. La version
+    anterior miraba Fecha Final, que viene llena siempre, y por eso daba todo
+    por planeado.
+    """
+    _obs_asignaturas(driver, cod_docente, cod_curso)
+    driver.execute_script("""
+        var a = document.getElementById('ASIGNATURA');
+        if (a) {
+            a.value = arguments[0];
+            if (typeof dtsasignatura === 'function') dtsasignatura(a.value);
+        }
+        var p = document.getElementById('PERIODO');
+        if (p) {
+            p.value = arguments[1];
+            if (typeof inicializarcapas === 'function') inicializarcapas();
+            if (typeof asignatperiodo === 'function') asignatperiodo(p);
+        }
+    """, cod_asig, str(periodo))
+    time.sleep(2)
+
+    driver.execute_script("document.getElementById('buttonx').click();")
+    try:
+        WebDriverWait(driver, TIMEOUT).until(lambda d: d.execute_script("""
+            var tablas = document.getElementsByTagName('table');
+            for (var t = 0; t < tablas.length; t++) {
+                var filas = tablas[t].rows;
+                for (var i = 0; i < filas.length; i++) {
+                    var c = filas[i].cells;
+                    if (c.length >= 7 && (c[0].innerText || '').trim() === 'No'
+                        && (c[3].innerText || '').indexOf('Inicio') >= 0) return true;
+                }
+            }
+            return false;
+        """))
+    except TimeoutException:
+        # Sin tabla no se puede afirmar que planeo; se cuenta como faltante.
+        return False
+
+    for fila in _obs_leer_tabla(driver):
+        if fila["periodo"] == str(periodo) and fila["fecha_inicio"] == fecha_bloque:
+            return bool(fila["informacion"])
+    return False
+
+
+def _fechas_bloques(driver, periodo):
+    """Fecha de inicio de cada bloque del periodo: {"0": "2026-02-02", ...}.
+
+    Plan_Aula_Obs no dice a que bloque pertenece cada planeacion, solo trae la
+    Fecha Inicio. El calendario esta en el select FECHAS del modulo de envio, y
+    ese select solo aparece DESPUES de pulsar Listar.
+
+    Se comprobo en la plataforma que esas fechas dependen unicamente del
+    periodo — mismo resultado con cursos y asignaturas distintos — asi que
+    basta leerlas una vez por verificacion.
+    """
+    driver.get(URL_PLANES)
+    WebDriverWait(driver, TIMEOUT).until(
+        EC.presence_of_element_located((By.ID, "CURSO")))
+    time.sleep(1)
+
+    cursos = _obs_leer_select(driver, "CURSO")
+    if not cursos:
+        return {}
+    driver.execute_script("""
+        var c = document.getElementById('CURSO');
+        c.value = arguments[0];
+        if (typeof colocarsemper === 'function') colocarsemper();
+        else c.dispatchEvent(new Event('change', {bubbles: true}));
+    """, cursos[0]["codigo"])
+    _obs_esperar_select(driver, "ASIGNATURA")
+
+    asigs = _obs_leer_select(driver, "ASIGNATURA")
+    if not asigs:
+        return {}
+    driver.execute_script("""
+        var a = document.getElementById('ASIGNATURA');
+        a.value = arguments[0];
+        if (typeof dtsasignatura === 'function') dtsasignatura(a.value);
+        var p = document.getElementById('PERIODO');
+        if (p) {
+            p.value = arguments[1];
+            if (typeof inicializarcapas === 'function') inicializarcapas();
+            if (typeof asignatperiodo === 'function') asignatperiodo(p);
+        }
+    """, asigs[0]["codigo"], str(periodo))
+    time.sleep(2)
+
+    driver.execute_script("document.getElementById('buttonx').click();")
+    try:
+        WebDriverWait(driver, TIMEOUT).until(lambda d: d.execute_script(
+            "var f = document.getElementById('FECHAS');"
+            "return f ? f.options.length > 1 : false;"))
+    except TimeoutException:
+        return {}
+
+    # El texto es "Fecha Inicio: 2026-02-02 - Fecha Final: 2026-02-13".
+    crudas = driver.execute_script("""
+        var f = document.getElementById('FECHAS');
+        var out = {};
+        for (var i = 0; i < f.options.length; i++) {
+            var v = (f.options[i].value || '').trim();
+            if (!v) continue;
+            out[v] = (f.options[i].text || '').trim();
+        }
+        return out;
+    """) or {}
+
+    fechas = {}
+    for bloque, texto in crudas.items():
+        m = re.search(r"(\d{4}-\d{2}-\d{2})", texto)
+        if m:
+            fechas[str(bloque)] = m.group(1)
+    return fechas
+
+
 CARPETA_REPORTES = os.path.join(CARPETA_DATOS, "reportes")
 
 
@@ -3233,7 +3501,22 @@ def verificar_planeaciones():
                 log("error", "No se detectó inicio de sesión")
                 driver.quit(); return
 
-            log("ok", "Sesión iniciada — leyendo lista de docentes")
+            log("ok", "Sesión iniciada")
+
+            # ── Fase 0: calendario del periodo ─────────────────
+            # Sin esto no se sabe que fechas corresponden al bloque pedido, y el
+            # modulo de observaciones solo informa la Fecha Inicio de cada plan.
+            fechas_bloques = _fechas_bloques(driver, periodo)
+            fecha_bloque   = fechas_bloques.get(str(bloque), "")
+            if not fecha_bloque:
+                _capturar_debug(driver, "obs_sin_fechas")
+                log("error", f"No se pudo leer el calendario del Periodo {periodo}. "
+                             f"Bloques disponibles: {sorted(fechas_bloques) or 'ninguno'}")
+                driver.quit(); return
+            log("info", f"Bloque {bloque} del Periodo {periodo} = planeaciones que "
+                        f"empiezan el {fecha_bloque}")
+
+            log("info", "Leyendo lista de docentes")
 
             # ── Fase 1: docentes ───────────────────────────────
             docentes = _obs_opciones(driver, "DOCENTE", recargar=True)
@@ -3246,6 +3529,7 @@ def verificar_planeaciones():
 
             reporte = {
                 "periodo": periodo, "bloque": bloque,
+                "fecha_bloque": fecha_bloque,
                 "completos": [], "faltantes": [],
                 "por_docente": {}, "por_materia": {},
             }
@@ -3279,7 +3563,7 @@ def verificar_planeaciones():
                         try:
                             estado = _obs_verificar(
                                 driver, doc["codigo"], curso["codigo"],
-                                asig["codigo"], periodo, bloque)
+                                asig["codigo"], periodo, fecha_bloque)
                         except Exception as ex:
                             log("warn", f"  {curso['codigo']} {asig['nombre'][:22]}: {str(ex)[:35]}")
                             continue
