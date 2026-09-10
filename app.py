@@ -2992,6 +2992,36 @@ def _obs_firma_select(driver, id_select):
     """, id_select)
 
 
+def _obs_esperar_carga(driver, id_select, firma_previa, timeout=20, asentar=2.5):
+    """Espera a que un select se repueble tras cambiar el de arriba.
+
+    Devuelve la lista de opciones. Tres desenlaces y ninguno es un fallo:
+      - cambia            -> lo normal, se devuelve en cuanto pasa
+      - no cambia         -> dos docentes con exactamente la misma carga
+      - se queda vacio    -> ese docente no tiene carga asignada
+
+    Antes esto eran dos esperas encadenadas de 45 s: primero a que cambiara,
+    y si no, a que tuviera opciones. Un docente sin carga —una coordinadora,
+    por ejemplo— no cumple ninguna de las dos, asi que costaba 90 segundos y
+    acababa en excepcion; encima desaparecia del reporte sin dejar rastro.
+    """
+    limite  = time.time() + timeout
+    estable = None
+    desde   = time.time()
+    while time.time() < limite:
+        actual = _obs_firma_select(driver, id_select)
+        tiene  = bool(actual and actual.strip(","))
+        if tiene and actual != firma_previa:
+            return _obs_leer_select(driver, id_select)      # cambio: listo
+        if actual != estable:
+            estable, desde = actual, time.time()            # sigue moviendose
+        elif time.time() - desde >= asentar:
+            # Lleva un rato quieto: o es la misma carga, o no hay ninguna.
+            return _obs_leer_select(driver, id_select)
+        time.sleep(0.25)
+    return _obs_leer_select(driver, id_select)
+
+
 def _obs_esperar_cambio(driver, id_select, firma_previa, timeout=TIMEOUT):
     """Espera a que un select se repueble con contenido DISTINTO al anterior.
 
@@ -3023,6 +3053,7 @@ def _obs_cursos(driver, cod_docente):
     """Elige el docente y devuelve los cursos que la plataforma le asigna."""
     actual = driver.execute_script(
         "var d = document.getElementById('DOCENTE'); return d ? d.value : null;")
+    cursos = None
     if actual != cod_docente:
         firma = _obs_firma_select(driver, "CURSO")
         driver.execute_script("""
@@ -3031,12 +3062,7 @@ def _obs_cursos(driver, cod_docente):
             if (typeof t_cur === 'function') t_cur(d.value);
             else d.dispatchEvent(new Event('change', {bubbles: true}));
         """, cod_docente)
-        try:
-            _obs_esperar_cambio(driver, "CURSO", firma)
-        except TimeoutException:
-            # Dos docentes pueden dictar exactamente los mismos cursos: la lista
-            # no cambia y no hay nada que esperar. Se sigue solo si ya hay algo.
-            _obs_esperar_select(driver, "CURSO")
+        cursos = _obs_esperar_carga(driver, "CURSO", firma)
 
     # La plataforma tiene que confirmar el docente antes de creerle a la lista.
     puesto = driver.execute_script(
@@ -3044,7 +3070,7 @@ def _obs_cursos(driver, cod_docente):
     if puesto != cod_docente:
         raise RuntimeError(
             "la plataforma no fijo el docente %s (quedo en %r)" % (cod_docente, puesto))
-    return _obs_leer_select(driver, "CURSO")
+    return cursos if cursos is not None else _obs_leer_select(driver, "CURSO")
 
 
 def _obs_asignaturas(driver, cod_docente, cod_curso):
@@ -3052,6 +3078,7 @@ def _obs_asignaturas(driver, cod_docente, cod_curso):
     _obs_cursos(driver, cod_docente)   # sale gratis si el docente ya esta puesto
     actual = driver.execute_script(
         "var c = document.getElementById('CURSO'); return c ? c.value : null;")
+    asigs = None
     if actual != cod_curso:
         firma = _obs_firma_select(driver, "ASIGNATURA")
         driver.execute_script("""
@@ -3060,17 +3087,14 @@ def _obs_asignaturas(driver, cod_docente, cod_curso):
             if (typeof colocarsemper === 'function') colocarsemper();
             else c.dispatchEvent(new Event('change', {bubbles: true}));
         """, cod_curso)
-        try:
-            _obs_esperar_cambio(driver, "ASIGNATURA", firma)
-        except TimeoutException:
-            _obs_esperar_select(driver, "ASIGNATURA")
+        asigs = _obs_esperar_carga(driver, "ASIGNATURA", firma)
 
     puesto = driver.execute_script(
         "var c = document.getElementById('CURSO'); return c ? c.value : null;")
     if puesto != cod_curso:
         raise RuntimeError(
             "la plataforma no fijo el curso %s (quedo en %r)" % (cod_curso, puesto))
-    return _obs_leer_select(driver, "ASIGNATURA")
+    return asigs if asigs is not None else _obs_leer_select(driver, "ASIGNATURA")
 
 
 # Fragmento JS que reconoce la tabla de resultados por su fila de encabezado.
@@ -3903,6 +3927,9 @@ def verificar_planeaciones():
                 # Lo que no se pudo comprobar va aparte: mezclarlo con los
                 # faltantes convertiria un fallo del bot en una acusacion.
                 "sin_verificar": [],
+                # Docentes que la plataforma no asocia a ningun curso: no son
+                # un incumplimiento, simplemente no dictan.
+                "sin_carga": [],
                 "por_docente": {}, "por_materia": {},
             }
             carga = {}
@@ -3913,10 +3940,18 @@ def verificar_planeaciones():
                 try:
                     cursos = _obs_cursos(driver, doc["codigo"])
                 except Exception as ex:
-                    log("warn", f"  {doc['nombre']}: no se pudieron leer sus cursos ({str(ex)[:40]})")
+                    # Se anota: antes desaparecia del reporte sin dejar rastro,
+                    # asi que el informe decia cubrir 34 docentes sin cubrirlos.
+                    reporte["sin_verificar"].append({
+                        "docente": doc["nombre"], "curso": "", "materia": "",
+                        "motivo": f"no se pudieron leer sus cursos: {str(ex)[:60]}"})
+                    log("warn", f"  {doc['nombre']}: SIN VERIFICAR — no se pudieron "
+                                f"leer sus cursos ({str(ex)[:40]})")
                     continue
 
                 if not cursos:
+                    # No es un fallo: coordinacion y directivos no dictan.
+                    reporte["sin_carga"].append(doc["nombre"])
                     log("info", f"  {doc['nombre']}: sin cursos asignados")
                     continue
 
@@ -3988,6 +4023,8 @@ def verificar_planeaciones():
             resumen = f"Verificación completada — {total_ok} con planeación, {total_fal} sin planeación"
             if total_sv:
                 resumen += f", {total_sv} SIN VERIFICAR (no cuentan como faltantes)"
+            if reporte["sin_carga"]:
+                resumen += f", {len(reporte['sin_carga'])} sin carga asignada"
             log("ok", resumen)
             log("done", "Reporte listo — revisa los resultados")
 
