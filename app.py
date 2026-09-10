@@ -3073,6 +3073,55 @@ def _obs_asignaturas(driver, cod_docente, cod_curso):
     return _obs_leer_select(driver, "ASIGNATURA")
 
 
+# Fragmento JS que reconoce la tabla de resultados por su fila de encabezado.
+# Se reusa en las tres funciones de abajo para no describirla tres veces.
+_JS_ES_TABLA_RESULTADOS = """
+    function esTablaResultados(tabla) {
+        for (var i = 0; i < tabla.rows.length; i++) {
+            var c = tabla.rows[i].cells;
+            if (c.length >= 7 && (c[0].innerText || '').trim() === 'No'
+                && (c[3].innerText || '').indexOf('Inicio') >= 0) return i;
+        }
+        return -1;
+    }
+"""
+
+
+def _obs_marcar_tabla_vieja(driver):
+    """Marca la tabla de resultados actual como vieja antes de pedir otra.
+
+    Listar deja en pantalla la tabla de la consulta anterior mientras llega la
+    nueva. Esperar solo a que "haya tabla" se cumple al instante con la vieja, y
+    entonces cada asignatura hereda la respuesta de la anterior: si la primera
+    tiene planeacion, todas salen con planeacion. Es el mismo error que hacia
+    que un docente heredara los cursos del anterior, en otro sitio.
+    """
+    return driver.execute_script(_JS_ES_TABLA_RESULTADOS + """
+        var n = 0;
+        var tablas = document.getElementsByTagName('table');
+        for (var t = 0; t < tablas.length; t++) {
+            if (esTablaResultados(tablas[t]) >= 0) {
+                tablas[t].setAttribute('data-vieja', '1');
+                n++;
+            }
+        }
+        return n;
+    """)
+
+
+def _obs_esperar_tabla_nueva(driver, timeout=TIMEOUT):
+    """Espera una tabla de resultados que NO venga marcada como vieja."""
+    WebDriverWait(driver, timeout).until(lambda d: d.execute_script(
+        _JS_ES_TABLA_RESULTADOS + """
+        var tablas = document.getElementsByTagName('table');
+        for (var t = 0; t < tablas.length; t++) {
+            if (tablas[t].hasAttribute('data-vieja')) continue;
+            if (esTablaResultados(tablas[t]) >= 0) return true;
+        }
+        return false;
+    """))
+
+
 def _obs_leer_tabla(driver):
     """Filas de la tabla de resultados, en una sola llamada al navegador.
 
@@ -3085,6 +3134,8 @@ def _obs_leer_tabla(driver):
     return driver.execute_script("""
         var tablas = document.getElementsByTagName('table');
         for (var t = 0; t < tablas.length; t++) {
+            // Si la vieja sigue en el DOM junto a la nueva, se descarta.
+            if (tablas[t].hasAttribute('data-vieja')) continue;
             var filas = tablas[t].rows;
             for (var i = 0; i < filas.length; i++) {
                 var c = filas[i].cells;
@@ -3134,23 +3185,15 @@ def _obs_verificar(driver, cod_docente, cod_curso, cod_asig, periodo, fecha_bloq
     """, cod_asig, str(periodo))
     time.sleep(2)
 
+    _obs_marcar_tabla_vieja(driver)
     driver.execute_script("document.getElementById('buttonx').click();")
     try:
-        WebDriverWait(driver, TIMEOUT).until(lambda d: d.execute_script("""
-            var tablas = document.getElementsByTagName('table');
-            for (var t = 0; t < tablas.length; t++) {
-                var filas = tablas[t].rows;
-                for (var i = 0; i < filas.length; i++) {
-                    var c = filas[i].cells;
-                    if (c.length >= 7 && (c[0].innerText || '').trim() === 'No'
-                        && (c[3].innerText || '').indexOf('Inicio') >= 0) return true;
-                }
-            }
-            return false;
-        """))
+        _obs_esperar_tabla_nueva(driver)
     except TimeoutException:
-        # Sin tabla no se puede afirmar que planeo; se cuenta como faltante.
-        return False
+        # No llego tabla nueva: no se sabe. Devolver False diria "no planeo" y
+        # acusaria al docente con un dato que nadie comprobo. Mejor fallar y que
+        # quede en el log como caso sin verificar.
+        raise RuntimeError("la plataforma no devolvio resultados a tiempo")
 
     for fila in _obs_leer_tabla(driver):
         if fila["periodo"] == str(periodo) and fila["fecha_inicio"] == fecha_bloque:
@@ -3857,6 +3900,9 @@ def verificar_planeaciones():
                 "periodo": periodo, "bloque": bloque,
                 "fecha_bloque": fecha_bloque,
                 "completos": [], "faltantes": [],
+                # Lo que no se pudo comprobar va aparte: mezclarlo con los
+                # faltantes convertiria un fallo del bot en una acusacion.
+                "sin_verificar": [],
                 "por_docente": {}, "por_materia": {},
             }
             carga = {}
@@ -3897,7 +3943,13 @@ def verificar_planeaciones():
                                 driver, doc["codigo"], curso["codigo"],
                                 asig["codigo"], periodo, fecha_bloque)
                         except Exception as ex:
-                            log("warn", f"  {curso['codigo']} {asig['nombre'][:22]}: {str(ex)[:35]}")
+                            # No se pudo comprobar. NO se cuenta como faltante:
+                            # eso acusaria al docente con un dato que nadie vio.
+                            reporte["sin_verificar"].append({
+                                "docente": doc["nombre"], "curso": curso["codigo"],
+                                "materia": asig["nombre"], "motivo": str(ex)[:80]})
+                            log("warn", f"  {curso['codigo']} — {asig['nombre']} — "
+                                        f"SIN VERIFICAR ({str(ex)[:60]})")
                             continue
 
                         entrada = {
@@ -3932,7 +3984,11 @@ def verificar_planeaciones():
 
             total_ok  = len(reporte["completos"])
             total_fal = len(reporte["faltantes"])
-            log("ok", f"Verificación completada — {total_ok} con planeación, {total_fal} sin planeación")
+            total_sv  = len(reporte["sin_verificar"])
+            resumen = f"Verificación completada — {total_ok} con planeación, {total_fal} sin planeación"
+            if total_sv:
+                resumen += f", {total_sv} SIN VERIFICAR (no cuentan como faltantes)"
+            log("ok", resumen)
             log("done", "Reporte listo — revisa los resultados")
 
         except Exception as e:
