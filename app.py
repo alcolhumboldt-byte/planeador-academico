@@ -3183,15 +3183,43 @@ def _obs_leer_tabla(driver):
     """) or []
 
 
-def _obs_verificar(driver, cod_docente, cod_curso, cod_asig, periodo, fecha_bloque):
-    """True si ese docente ya planeo ese bloque en ese curso y asignatura.
+def _obs_esperar_seleccion(driver, cod_asig, periodo, timeout=8, asentar=0.6):
+    """Espera a que la plataforma acepte la asignatura y el periodo pedidos.
 
-    Una sola pulsada de Listar devuelve TODAS las planeaciones del periodo, asi
-    que el bloque se decide comparando fechas, sin repetir la consulta.
+    Antes aqui habia un time.sleep(2) a ojo. Multiplicado por las ~400
+    consultas de una corrida eran 13 minutos sin hacer nada. Comprobar la
+    condicion en vez de esperar un rato fijo deja el caso normal en menos de un
+    segundo, y ademas detecta cuando la plataforma NO acepto la seleccion.
+    """
+    limite = time.time() + timeout
+    listo_desde = None
+    while time.time() < limite:
+        estado = driver.execute_script("""
+            var a = document.getElementById('ASIGNATURA');
+            var p = document.getElementById('PERIODO');
+            return {asig: a ? a.value : null, per: p ? p.value : null};
+        """) or {}
+        if estado.get("asig") == cod_asig and str(estado.get("per")) == str(periodo):
+            # Puestos. Se deja un margen corto porque los onchange de la
+            # plataforma disparan peticiones propias antes de que Listar sirva.
+            listo_desde = listo_desde or time.time()
+            if time.time() - listo_desde >= asentar:
+                return True
+        else:
+            listo_desde = None
+        time.sleep(0.15)
+    return False
 
-    Se mira la columna Informacion para saber si hay contenido. La version
-    anterior miraba Fecha Final, que viene llena siempre, y por eso daba todo
-    por planeado.
+
+def _obs_planeadas(driver, cod_docente, cod_curso, cod_asig, periodo):
+    """Fechas de inicio ya planeadas para ese docente, curso y asignatura.
+
+    Devuelve un conjunto de fechas con contenido en la columna Informacion.
+
+    Una sola pulsada de Listar trae TODAS las planeaciones del periodo, o sea
+    los seis bloques. Antes se devolvia un si/no para el bloque pedido y se
+    tiraban los otros cinco, asi que consultar otro bloque obligaba a repetir
+    la corrida entera. Ahora se devuelven todas y quien llama decide.
     """
     _obs_asignaturas(driver, cod_docente, cod_curso)
     driver.execute_script("""
@@ -3207,22 +3235,30 @@ def _obs_verificar(driver, cod_docente, cod_curso, cod_asig, periodo, fecha_bloq
             if (typeof asignatperiodo === 'function') asignatperiodo(p);
         }
     """, cod_asig, str(periodo))
-    time.sleep(2)
+
+    if not _obs_esperar_seleccion(driver, cod_asig, periodo):
+        raise RuntimeError("la plataforma no acepto la asignatura o el periodo")
 
     _obs_marcar_tabla_vieja(driver)
     driver.execute_script("document.getElementById('buttonx').click();")
     try:
         _obs_esperar_tabla_nueva(driver)
     except TimeoutException:
-        # No llego tabla nueva: no se sabe. Devolver False diria "no planeo" y
-        # acusaria al docente con un dato que nadie comprobo. Mejor fallar y que
-        # quede en el log como caso sin verificar.
+        # No llego tabla nueva: no se sabe. Devolver "sin planeacion" acusaria
+        # al docente con un dato que nadie comprobo.
         raise RuntimeError("la plataforma no devolvio resultados a tiempo")
 
+    planeadas = set()
     for fila in _obs_leer_tabla(driver):
-        if fila["periodo"] == str(periodo) and fila["fecha_inicio"] == fecha_bloque:
-            return bool(fila["informacion"])
-    return False
+        if fila["periodo"] == str(periodo) and fila["informacion"]:
+            planeadas.add(fila["fecha_inicio"])
+    return planeadas
+
+
+def _obs_verificar(driver, cod_docente, cod_curso, cod_asig, periodo, fecha_bloque):
+    """True si ese docente ya planeo ese bloque. Envoltorio de _obs_planeadas."""
+    return fecha_bloque in _obs_planeadas(
+        driver, cod_docente, cod_curso, cod_asig, periodo)
 
 
 def _fechas_bloques(driver, periodo):
@@ -3930,6 +3966,9 @@ def verificar_planeaciones():
                 # Docentes que la plataforma no asocia a ningun curso: no son
                 # un incumplimiento, simplemente no dictan.
                 "sin_carga": [],
+                # Resultado de los SEIS bloques del periodo, no solo del pedido.
+                # Sale gratis: cada consulta a la plataforma ya los trae todos.
+                "por_bloque": {},
                 "por_docente": {}, "por_materia": {},
             }
             carga = {}
@@ -3974,9 +4013,10 @@ def verificar_planeaciones():
                         carga[doc["nombre"]].append(
                             {"curso": curso["codigo"], "asignatura": asig["nombre"]})
                         try:
-                            estado = _obs_verificar(
+                            planeadas = _obs_planeadas(
                                 driver, doc["codigo"], curso["codigo"],
-                                asig["codigo"], periodo, fecha_bloque)
+                                asig["codigo"], periodo)
+                            estado = fecha_bloque in planeadas
                         except Exception as ex:
                             # No se pudo comprobar. NO se cuenta como faltante:
                             # eso acusaria al docente con un dato que nadie vio.
@@ -3995,6 +4035,16 @@ def verificar_planeaciones():
                             doc["nombre"], {"completos": [], "faltantes": []})
                         m = reporte["por_materia"].setdefault(
                             asig["nombre"], {"completos": [], "faltantes": []})
+
+                        # La consulta ya trajo los seis bloques del periodo: se
+                        # guardan todos. Asi consultar otro bloque despues no
+                        # obliga a repetir la corrida completa.
+                        for n_bloque, fecha_n in fechas_bloques.items():
+                            b = reporte["por_bloque"].setdefault(
+                                str(n_bloque), {"fecha": fecha_n,
+                                                "completos": [], "faltantes": []})
+                            destino = "completos" if fecha_n in planeadas else "faltantes"
+                            b[destino].append(entrada)
 
                         if estado:
                             reporte["completos"].append(entrada)
@@ -4025,6 +4075,11 @@ def verificar_planeaciones():
                 resumen += f", {total_sv} SIN VERIFICAR (no cuentan como faltantes)"
             if reporte["sin_carga"]:
                 resumen += f", {len(reporte['sin_carga'])} sin carga asignada"
+            otros = [b for b in reporte["por_bloque"] if b != str(bloque)]
+            if otros:
+                log("info", f"De paso quedaron guardados los bloques "
+                            f"{', '.join(sorted(otros))} del mismo periodo: "
+                            f"consultarlos ya no requiere otra corrida")
             log("ok", resumen)
             log("done", "Reporte listo — revisa los resultados")
 
